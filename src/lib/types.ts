@@ -86,7 +86,9 @@ const TranscriptRecord = z.object({
     .object({
       to: z.literal('en'),
       from: z.string(),
-      pair: z.enum(['zh-en', 'ja-en', 'ko-en']),
+      pair: z.enum(['zh-en', 'ja-en', 'ko-en', 'nllb']),
+      /** FLORES-200 source code handed to NLLB; absent on the Opus-MT pairs. */
+      srcLang: z.string().optional(),
       model: z.string(),
     })
     .optional(),

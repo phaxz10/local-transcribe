@@ -12,7 +12,13 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
-import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { getMediaAsset, saveMediaAsset, saveTranscript } from '@/lib/db'
 import {
@@ -32,7 +38,12 @@ import {
   type FlatWord,
 } from '@/lib/playback'
 import { useApp } from '@/lib/store'
-import { sourceLanguageLabel, translationPairFor } from '@/lib/translation'
+import {
+  isEnglish,
+  sourceLanguageLabel,
+  translationPairFor,
+  TRANSLATION_SOURCES,
+} from '@/lib/translation'
 import {
   alternateByTurn,
   assignSpeakerForward,
@@ -364,6 +375,12 @@ export function TranscriptView() {
   const [replaceText, setReplaceText] = useState('')
   const [replaceCount, setReplaceCount] = useState<number | null>(null)
   const [layer, setLayer] = useState<ExportLayer>('corrected')
+  // Source language for the Translate action when the record's own is `auto` or off our list; the
+  // Transcribe screen's pick stands in as the default (ADR-0018).
+  const [source, setSource] = useState<string>(() => {
+    const l = useApp.getState().sessionLanguage ?? useApp.getState().primaryLanguage
+    return translationPairFor(l) ? l : ''
+  })
 
   // Latest record without re-binding callbacks (keeps SegmentRow memo stable while typing).
   const recordRef = useRef(record)
@@ -638,7 +655,7 @@ export function TranscriptView() {
       ? 'Decoding source media'
       : bgJob?.phase === 'loading'
         ? bgJob.kind === 'translate'
-          ? 'Loading the translation model (113 MB, once)'
+          ? 'Loading the translation model (once)'
           : 'Loading model'
         : bgJob?.phase === 'translating'
           ? 'Translating to English'
@@ -769,20 +786,39 @@ export function TranscriptView() {
           )}
 
           <div className="ml-auto flex flex-wrap items-center gap-1">
-            {translationPairFor(record.asr.language) && !record.translation && (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={!!job}
-                onClick={() => void translateRecord()}
-                title={
-                  job
-                    ? 'A job is already running'
-                    : 'Machine-translate every segment into English (the corrected layer)'
-                }
-              >
-                <Languages className="size-3.5" /> Translate to English
-              </Button>
+            {/* Offered for every non-English transcript, translated or not: re-running overwrites the
+                Edit layer through the time machine, so Undo puts the previous one back. */}
+            {!isEnglish(record.asr.language) && (
+              <>
+                {!translationPairFor(record.asr.language) && (
+                  <Select value={source} onValueChange={setSource}>
+                    <SelectTrigger className="h-8 w-36 text-xs" aria-label="Source language">
+                      <SelectValue placeholder="From…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TRANSLATION_SOURCES.map((l) => (
+                        <SelectItem key={l.code} value={l.code}>
+                          {l.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!!job || (!translationPairFor(record.asr.language) && !source)}
+                  onClick={() => void translateRecord(source)}
+                  title={
+                    job
+                      ? 'A job is already running'
+                      : 'Machine-translate every segment into English (the corrected layer)'
+                  }
+                >
+                  <Languages className="size-3.5" />{' '}
+                  {record.translation ? 'Translate again' : 'Translate to English'}
+                </Button>
+              </>
             )}
             <Button
               variant="ghost"

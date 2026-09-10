@@ -26,17 +26,17 @@ Note: Whisper's own `translate` task is **not used anywhere in the app** ([ADR-0
 
 ---
 
-## 1b. Translate to English (Web Transcribe) — Marian MT Models
+## 1b. Translate to English (Web Transcribe) — MT Models
 
-Stage two of a transcription, not a Catalog entry: the Transcript is transcribed in the source language, then each Segment is machine-translated into the **Edit Layer**. Loaded with `pipeline('translation', id, { dtype: 'q8' })` on Transformers.js 4.2.0, **device `wasm` always** (~75 M-param int8 graphs; GPU dispatch would cost more than the arithmetic). Fetched on demand — **not** prefetched by `download.ts`.
+Stage two of a transcription, not a Catalog entry: the Transcript is transcribed in the source language, then each Segment is machine-translated into the **Edit Layer**. Loaded with `pipeline('translation', id, { dtype: 'q8' })` on Transformers.js 4.2.0, **device `wasm` always** (int8 graphs; GPU dispatch would cost more than the arithmetic). Fetched on demand — **not** prefetched by `download.ts`. Opus-MT keeps the three pairs it is good at; **NLLB-200 is the fallback for every other language** ([ADR-0018](./adr/0018-two-stage-translation.md)).
 
 | Pair | HF id | ~Size (q8) | Files | Notes |
 |---|---|---|---|---|
-| **`zh-en`** (Mandarin, and Cantonese as best effort) | `Xenova/opus-mt-zh-en` | **113 MB** | `onnx/encoder_model_quantized.onnx` 52.9 MB + `onnx/decoder_model_merged_quantized.onnx` 60.2 MB + tokenizer/config | Verified: three sentences in 0.2 s on CPU. Cantonese has no `yue-en` Marian; Whisper writes Cantonese out as written Chinese, which this reads |
+| **`zh-en`** (Mandarin) | `Xenova/opus-mt-zh-en` | **113 MB** | `onnx/encoder_model_quantized.onnx` 52.9 MB + `onnx/decoder_model_merged_quantized.onnx` 60.2 MB + tokenizer/config | Verified: three sentences in 0.2 s on CPU |
 | **`ja-en`** (Japanese) | `Xenova/opus-mt-ja-en`, `Xenova/opus-mt-ko-en` (Korean, 113 MB) | ~108 MB | 58 + 50 MB | Same shape as `zh-en` |
-| Tagalog | — | — | — | **No model.** No `Xenova/opus-mt-tl-en` exists; the Transcribe screen says so instead of offering a dead switch |
+| **`nllb`** (everything else: Cantonese, Tagalog, Spanish, French, …) | `Xenova/nllb-200-distilled-600M` | **~900 MB** | `onnx/encoder_model_quantized.onnx` 419 MB + `onnx/decoder_model_merged_quantized.onnx` 475 MB + tokenizer/config | 200 languages in one graph, so the call carries a FLORES-200 `src_lang` plus `tgt_lang: 'eng_Latn'`. Batched **4** per `generate`, not 8. Cantonese uses this (`yue_Hant`) rather than `zh-en`: it actually knows written Cantonese |
 
-Batched 8 texts per `generate` call, `max_new_tokens = min(256, 4 × longest source character count + 16)`. Word times inside a translated Segment are **interpolated** across that Segment's span (ADR-0016's helper), because English word order does not line up with the source.
+Batched 8 texts per `generate` call (4 for NLLB, which is 8× the parameters), `max_new_tokens = min(256, 4 × longest source character count + 16)`. Word times inside a translated Segment are **interpolated** across that Segment's span (ADR-0016's helper), because English word order does not line up with the source.
 
 Upgrade path: `Xenova/nllb-200-distilled-600M` closes both the Cantonese and Tagalog gaps with one model (`yue_Hant`, `tgl_Latn`) at 5× the download — see §2 below, and reach for it when a third pair is actually asked for.
 

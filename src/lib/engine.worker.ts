@@ -93,7 +93,7 @@ export type WorkerRequest =
     }
   | { id: number; type: 'benchmark'; model: CatalogModel; device: EngineDevice }
   /** Stage two of translation (ADR-0018): one English string back per Segment text. */
-  | { id: number; type: 'translate'; pair: TranslationPair; texts: string[] }
+  | { id: number; type: 'translate'; pair: TranslationPair; srcLang?: string; texts: string[] }
   | { type: 'dispose' }
 
 export type WorkerEvent =
@@ -347,11 +347,12 @@ type MT = ((texts: string[], opts?: Record<string, unknown>) => Promise<{ transl
 
 /**
  * Its OWN slot, separate from the ASR `current`, so switching Transcription Model does not evict a
- * 113 MB Marian that is about to translate the result of that very run. `dispose` clears both.
+ * translator that is about to translate the result of that very run. `dispose` clears both. Keyed
+ * by model id, since the Marian pairs and NLLB share this one slot.
  *
- * Always WASM: these are int8 Marians of ~75 M params, where GPU dispatch overhead would dominate.
+ * Always WASM: int8 graphs where GPU dispatch overhead would dominate the arithmetic.
  */
-let currentMt: { pair: TranslationPair; engine: MT } | null = null
+let currentMt: { id: string; engine: MT } | null = null
 
 async function disposeMt(): Promise<void> {
   const m = currentMt
@@ -364,9 +365,13 @@ async function disposeMt(): Promise<void> {
 }
 
 async function loadMt(pair: TranslationPair, onProgress?: (s: LoadStatus) => void): Promise<MT> {
-  if (currentMt?.pair === pair) return currentMt.engine
+  // ponytail: NLLB's ~900 MB of int8 weights sit in the wasm32 heap alongside whatever ASR engine
+  // is loaded. Nowhere near the 4 GB address-space ceiling with today's models, but that is the
+  // ceiling — if a bigger translator ever lands here, evict `current` before loading it.
+  const id = translationModelId(pair)
+  if (currentMt?.id === id) return currentMt.engine
   if (currentMt) await disposeMt()
-  const engine = (await pipeline('translation', translationModelId(pair), {
+  const engine = (await pipeline('translation', id, {
     device: 'wasm',
     dtype: 'q8',
     // onnxruntime-web's extended QDQ pass chokes on this export's shared embedding:
@@ -376,16 +381,20 @@ async function loadMt(pair: TranslationPair, onProgress?: (s: LoadStatus) => voi
     session_options: { graphOptimizationLevel: 'basic' },
     progress_callback: makeReporter(onProgress) as never,
   })) as unknown as MT
-  currentMt = { pair, engine }
+  currentMt = { id, engine }
   return engine
 }
 
-/** Texts per generate call. Marian pads to the longest member, so a big batch wastes decode. */
-const MT_BATCH = 8
+/**
+ * Texts per generate call. The pipeline pads to the longest member, so a big batch wastes decode —
+ * and NLLB is 8x the parameters of a Marian, so it gets half the batch.
+ */
+const MT_BATCH = { marian: 8, nllb: 4 }
 
 async function translateTexts(
   engine: MT,
   texts: string[],
+  srcLang: string | undefined,
   onProgress: (s: TranscribeProgress) => void,
 ): Promise<string[]> {
   const out = texts.map(() => '')
@@ -401,13 +410,17 @@ async function translateTexts(
       totalSeconds: 0,
     })
   report()
-  for (let at = 0; at < todo.length; at += MT_BATCH) {
-    const slice = todo.slice(at, at + MT_BATCH)
+  const step = srcLang ? MT_BATCH.nllb : MT_BATCH.marian
+  for (let at = 0; at < todo.length; at += step) {
+    const slice = todo.slice(at, at + step)
     const batch = slice.map((i) => texts[i])
     const longest = Math.max(...batch.map((t) => [...t].length))
     const res = await engine(batch, {
       // ~4 tokens per source character is generous for zh/ja→en; the cap stops a runaway decode.
       max_new_tokens: Math.min(256, 4 * longest + 16),
+      // NLLB is one multilingual graph: it needs to be told both ends of the direction. Marian
+      // pairs are single-direction and reject these.
+      ...(srcLang ? { src_lang: srcLang, tgt_lang: 'eng_Latn' } : {}),
     })
     slice.forEach((i, k) => (out[i] = (res[k]?.translation_text ?? '').trim()))
     done += slice.length
@@ -884,7 +897,7 @@ async function handle(req: Exclude<WorkerRequest, { type: 'dispose' }>): Promise
 
   if (req.type === 'translate') {
     const engine = await loadMt(req.pair, (status) => post({ id, type: 'loadProgress', status }))
-    const translations = await translateTexts(engine, req.texts, (status) =>
+    const translations = await translateTexts(engine, req.texts, req.srcLang, (status) =>
       post({ id, type: 'progress', status }),
     )
     post({ id, type: 'done', translations })

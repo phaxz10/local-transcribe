@@ -12,7 +12,7 @@ import type {
 } from './types'
 import { detectCapability, estimateEta, fitCheck } from './capability'
 import { RETIRED, buildCatalog, recommendModel } from './catalog'
-import { joinSegmentText, translationPairFor } from './translation'
+import { floresFor, joinSegmentText, translationModelId, translationPairFor } from './translation'
 import {
   deleteRecordingChunks,
   deleteTranscript,
@@ -149,8 +149,8 @@ let lastModel: { model: CatalogModel; makeActive: boolean } | null = null
  * through Marian and the English comes back as the Edit layer, so the raw export stays the source
  * language and the corrected export is English subtitles.
  *
- * Falls back to the plain 1:1 derivation when the language has no Marian pair (English, Tagalog,
- * 'auto'), which is also what makes the call site a one-liner.
+ * Falls back to the plain 1:1 derivation when the language has no pair (English, 'auto', anything
+ * outside `TRANSLATION_SOURCES`), which is also what makes the call site a one-liner.
  */
 async function translateRecordSegments(
   asr: AsrLayer,
@@ -161,10 +161,12 @@ async function translateRecordSegments(
   if (!pair || asr.segments.length === 0) return { edit: deriveEditLayer(asr) }
   const { patch } = opts
   patch?.({ phase: 'translating', pct: 0, partial: '', etaSec: null })
+  const srcLang = pair === 'nllb' ? (floresFor(language) ?? undefined) : undefined
   const translations = await translateTexts(
     pair,
     asr.segments.map((s) => joinSegmentText(s.words.map((w) => w.text))),
     {
+      srcLang,
       signal: opts.signal,
       onLoadProgress: (s) => patch?.({ phase: 'loading', pct: Math.round(s.ratio * 100) }),
       onProgress: (s) => patch?.({ phase: 'translating', pct: Math.round(s.ratio * 100) }),
@@ -172,7 +174,7 @@ async function translateRecordSegments(
   )
   return {
     edit: deriveTranslatedEditLayer(asr, translations),
-    translation: { to: 'en', from: language, pair, model: `opus-mt-${pair}` },
+    translation: { to: 'en', from: language, pair, srcLang, model: translationModelId(pair) },
   }
 }
 
@@ -463,8 +465,11 @@ interface AppState {
   runFileJob: (file: File) => Promise<void>
   /** Re-transcribe the open record with the Active Model as a nav-safe background job. */
   runRerunJob: () => Promise<void>
-  /** Machine-translate the open record into English, replacing its Edit layer (undoable). */
-  translateRecord: () => Promise<void>
+  /**
+   * Machine-translate the open record into English, replacing its Edit layer (undoable). `source`
+   * is the language the user picked when the record's own language is `auto` or unknown.
+   */
+  translateRecord: (source?: string) => Promise<void>
   /** Download a model as a nav-safe background job (fetch → load → provision → benchmark). */
   startModelDownload: (m: CatalogModel, opts?: { makeActive?: boolean }) => Promise<void>
   /** Abort the in-flight Download; the bytes already fetched are kept for a resume. */
@@ -885,13 +890,12 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
-  translateRecord: async () => {
-    const { record, job, sessionLanguage, primaryLanguage } = get()
+  translateRecord: async (source) => {
+    const { record, job } = get()
     if (!record || job) return // same single-job invariant as the transcription jobs
     // A record transcribed with language auto-detect has no source language of its own, so the
-    // Transcribe screen's current pick stands in for it.
-    const language =
-      record.asr.language !== 'auto' ? record.asr.language : sessionLanguage ?? primaryLanguage
+    // transcript toolbar's picker hands one in.
+    const language = translationPairFor(record.asr.language) ? record.asr.language : (source ?? '')
     if (!translationPairFor(language)) return
     jobAbort?.abort()
     const ac = new AbortController()

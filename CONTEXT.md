@@ -104,7 +104,7 @@ _Not_: Whisper's `translate` task. The app never runs it — `AsrLayer.task` is 
 _Avoid_: interpret, localize.
 
 **Translation Pair**:
-A source→English direction Web Transcribe can machine-translate, named for the Marian model behind it: `zh-en` (also used for Cantonese, as a stated best effort) and `ja-en`. It is chosen by the Transcript's **language**, not by the Transcription Model. Tagalog has no Pair, and the Transcribe screen says so rather than offering a switch that would do nothing.
+A source→English direction Web Transcribe can machine-translate. Three are named for the Marian model behind them — `zh-en`, `ja-en`, `ko-en` — and the fourth, `nllb`, is the 200-language fallback (`Xenova/nllb-200-distilled-600M`, ~900 MB) that covers every other language, Cantonese and Tagalog included, carrying a FLORES-200 source code with the request. It is chosen by the Transcript's **language**, not by the Transcription Model, so every non-English Transcript has a Pair. A Transcript recorded as Other / Mixed has none until the user names the source on the transcript itself.
 _Avoid_: language pair (that's Native Translate's bidirectional **Travel Language Pair**), direction, translation model (the Pair names the direction; the Model is what implements it).
 
 **Translation Provider**:

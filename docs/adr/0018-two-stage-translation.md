@@ -31,20 +31,27 @@ Measured: three sentences in 0.2 s on CPU. Batched 8 texts per `generate` call, 
 
 so the pipeline is created with `session_options: { graphOptimizationLevel: 'basic' }`, which skips that whole family of rewrites. On a 77 M-param Marian the lost fusions cost nothing measurable, and the alternative is the ~310 MB fp32 graph. Don't drop that option when touching `loadMt`; it is the difference between working and not loading at all.
 
-Cantonese (`yue`) maps to `zh-en` as an explicit best effort: there is no `yue-en` Marian model, and Whisper writes Cantonese speech out as written Chinese anyway, which is what `opus-mt-zh-en` reads.
+## Fallback: NLLB-200
 
-**Tagalog has no pair at all** — no `Xenova/opus-mt-tl-en` exists — so the Transcribe screen says so plainly instead of offering a switch that would do nothing.
+Opus-MT only covers the pairs someone bothered to train, and the Xenova ONNX set has no `tl-en` and no `yue-en` at all. So **`Xenova/nllb-200-distilled-600M`** (`q8`: `onnx/encoder_model_quantized.onnx` 419 MB + `onnx/decoder_model_merged_quantized.onnx` 475 MB, ~900 MB all in) is the fallback for every language without one, and `TranslationPair` gains a fourth value, `'nllb'`.
+
+It is one multilingual graph, so it has to be told both ends of the direction: the request carries a **FLORES-200 `srcLang`** (`tgl_Latn`, `spa_Latn`, …) and the pipeline is called with `{ src_lang, tgt_lang: 'eng_Latn' }`. `TRANSLATION_SOURCES` in `translation.ts` is the whole table — code, Whisper language name, English label, FLORES code — and it is what the source-language picker renders, so adding a language is one row.
+
+Opus-MT keeps `zh`, `ja` and `ko`: 113 MB and three sentences in 0.2 s beats 900 MB and a much slower decode, and the quality on those three is not the problem.
+
+**Cantonese moves to NLLB.** `yue_Hant` was actually trained on written Cantonese; routing `yue` through `opus-mt-zh-en` only ever worked because Whisper flattens Cantonese into written Chinese, and it lost every Cantonese-specific particle in the process. The extra 800 MB buys a translation that is right instead of merely plausible, and it is only downloaded by the users who ask for it.
+
+NLLB shares `currentMt`, now keyed by **model id** rather than by pair, and it batches **4** texts per `generate` (against Marian's 8) because it is eight times the parameters and the pipeline pads to the longest member. `graphOptimizationLevel: 'basic'` stays set for both — it costs nothing measurable and it is what makes the Marian q8 export load at all.
+
+Because every non-English language now has a direction, the transcript toolbar offers **"Translate to English" on every non-English transcript**, and **"Translate again"** on one already translated (the same action; it overwrites the Edit Layer through `commitEdit`, so Undo restores). When the record's own language is `auto` — the user picked Other / Mixed — there is no source to translate *from*, so a compact source-language `Select` appears beside the button and the button waits for a pick. The Transcribe screen's Translate switch is hidden for `auto` for the same reason, with a note pointing at the transcript.
 
 ## Consequences
 
-- The Translate switch gates on the **language**, not the Transcription Model. Any model that can transcribe zh/ja/yue can now be translated, including the ones that could never do Whisper translate.
+- The Translate switch gates on the **language**, not the Transcription Model. Any model that can transcribe a non-English language can now be translated, including the ones that could never do Whisper translate.
 - The MT pipeline lives in **its own worker slot** (`currentMt`), separate from the ASR Engine, so switching Transcription Model does not evict a Marian that is about to translate that run's output. `dispose` clears both.
 - **Timings are interpolated per Segment**: English word order does not line up with the source, so each translated Segment's words are spread across that Segment's own span, `origin: null`, `timing: 'interpolated'`. Seeking lands on the right Segment, not the right word. `interpolateWords` ([ADR-0016](./0016-timestamp-free-models.md)) does the spreading, unchanged.
 - An **empty translation keeps the source words** for that Segment. A gap in the MT output must never silently delete a line of the transcript.
 - Translation can be applied to an **existing** transcript from the editor (`translateRecord`), which goes through the normal undo stack — Undo puts the source-language Edit Layer *and* the missing `translation` note back.
-- The MT models are **not prefetched** by `download.ts`. At ~113 MB they are a fifth of the smallest ASR model, only the subset of users who turn Translate on want them, and Transformers.js fetches them fine on its own.
+- The MT models are **not prefetched** by `download.ts`. Only the subset of users who turn Translate on want them, and Transformers.js fetches them fine on its own — which matters much more for NLLB's 900 MB than it did for Marian's 113.
 - Old records with `asr.task === 'translate'` still load; the header note now keys on `record.translation`, so they read as ordinary transcripts.
 
-## The future option
-
-**NLLB-200-distilled-600M** (`Xenova/nllb-200-distilled-600M`, ~600 MB q8) covers 200 languages including `yue_Hant` and `tgl_Latn`, and would close the Cantonese and Tagalog gaps with one model instead of one per pair. It costs 5× the download and is slower per Segment, so it is the upgrade to reach for when a second language pair is actually asked for, not the first thing to ship.

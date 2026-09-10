@@ -94,8 +94,9 @@ export function Workspace() {
           </div>
         )}
 
-        {/* Gated on the LANGUAGE, not the model: translation is a second Marian stage over the
-            finished transcript now, so the Transcription Model has no say in it (ADR-0018). */}
+        {/* Gated on the LANGUAGE, not the model: translation is a second MT stage over the finished
+            transcript now, so the Transcription Model has no say in it (ADR-0018). Every non-English
+            language has a pair; `auto` has none until the detected language is known. */}
         {!activeModel.englishOnly && translationPairFor(language) && (
           <div className="flex items-center gap-2">
             <Switch id="translate" checked={translate} onCheckedChange={setTranslate} />
@@ -104,9 +105,10 @@ export function Workspace() {
             </Label>
           </div>
         )}
-        {language === 'tl' && (
+        {language === 'auto' && (
           <p className="text-xs text-muted-foreground">
-            Tagalog translation is not available yet.
+            Other / Mixed can't be translated during transcription — pick the source language on the
+            transcript once it finishes.
           </p>
         )}
       </div>

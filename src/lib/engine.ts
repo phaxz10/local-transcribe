@@ -245,6 +245,8 @@ export async function transcribeWithEngine(
 }
 
 export interface TranslateOpts {
+  /** FLORES-200 source code, required for the `'nllb'` pair and unused by the Marian pairs. */
+  srcLang?: string
   signal?: AbortSignal
   onProgress?: (s: TranscribeProgress) => void
   onLoadProgress?: LoadProgress
@@ -262,7 +264,7 @@ export async function translateTexts(
   texts: string[],
   opts: TranslateOpts = {},
 ): Promise<string[]> {
-  const done = await call((id) => ({ id, type: 'translate', pair, texts }), {
+  const done = await call((id) => ({ id, type: 'translate', pair, srcLang: opts.srcLang, texts }), {
     signal: opts.signal,
     cancelMessage: 'Translation stopped',
     onEvent: (ev) => {
