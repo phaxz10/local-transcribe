@@ -36,7 +36,11 @@ const ENTRIES: Entry[] = [
   // output_attentions=True (same q4/fp16 ONNX variants). Don't revert this id, it reintroduces the crash.
   // yue: 0, not 2. Turbo scores 43.3% CER on FLEURS Cantonese, a 4x regression against large-v3;
   // `small-yue` below is 7.93% CER at a quarter of the download (docs/research-asr-2026-09.md §1).
-  { id: 'large-v3-turbo', label: 'Large v3 Turbo', task: 'transcription', family: 'large-v3-turbo', hfId: 'onnx-community/whisper-large-v3-turbo_timestamped', englishOnly: false, multilingual: true, sizeMb: 1600, ramCeilingMb: 2400, requiresWebGPU: true, languages: { en: 3, zh: 3, ja: 3, yue: 0, tl: 2 } },
+  { id: 'large-v3-turbo', label: 'Large v3 Turbo', task: 'transcription', family: 'large-v3-turbo', hfId: 'onnx-community/whisper-large-v3-turbo_timestamped', englishOnly: false, multilingual: true, sizeMb: 1600, ramCeilingMb: 2400, requiresWebGPU: true, languages: { en: 3, zh: 2, ja: 3, yue: 0, tl: 2 } },
+  // Mandarin fine-tune of turbo (BELLE-2), self-exported with cross-attentions (see
+  // ~/Desktop/belle-export/README.md). Word-level DTW drifts on very short chunks in this
+  // fine-tune, so it runs on chunk timestamps. Same dtype policy as its family.
+  { id: 'turbo-zh', label: 'Large v3 Turbo (Mandarin)', task: 'transcription', family: 'large-v3-turbo', hfId: 'phaxz10/belle-whisper-large-v3-turbo-zh_timestamped', englishOnly: false, multilingual: false, forceLanguage: 'chinese', sizeMb: 1613, sizeMbWasm: 1717, ramCeilingMb: 2400, requiresWebGPU: true, timestamps: 'chunk', languages: { zh: 3, yue: 1, en: 1, ja: 0, tl: 0 } },
   // Cantonese specialist (alvanlii/whisper-small-cantonese). Two verified quirks:
   //  1. Its tokenizer is Whisper-v2's 99-language one (vocab 51865) and has NO `<|yue|>` token, so
   //     `language: 'cantonese'` would not resolve -> forceLanguage 'chinese'. `forced_decoder_ids`
@@ -113,6 +117,10 @@ export function recommendModel(
   const ranked = usable.sort((a, b) => {
     const fr = familyRank(b) - familyRank(a)
     if (fr !== 0) return fr
+    if (!english && primary !== 'auto') {
+      const lr = (b.languages[primary] ?? 0) - (a.languages[primary] ?? 0)
+      if (lr !== 0) return lr
+    }
     return english
       ? Number(b.englishOnly) - Number(a.englishOnly)
       : Number(b.multilingual) - Number(a.multilingual)
@@ -128,6 +136,8 @@ if (import.meta.env.DEV) {
   const pick = (lang: PrimaryLanguage, cap: CapabilityReport = high) =>
     recommendModel(buildCatalog(), cap, lang)?.id
   console.assert(pick('yue') === 'small-yue', 'recommendModel(yue) should be small-yue, got', pick('yue'))
+  console.assert(pick('zh') === 'turbo-zh', 'recommendModel(zh) should be turbo-zh, got', pick('zh'))
+  console.assert(pick('ja') === 'large-v3-turbo', 'recommendModel(ja) should be large-v3-turbo, got', pick('ja'))
   console.assert(pick('en') === 'large-v3-turbo', 'recommendModel(en) should be large-v3-turbo, got', pick('en'))
   // English without WebGPU: Parakeet CTC, not Small. It is the reason small.en was retired.
   console.assert(
