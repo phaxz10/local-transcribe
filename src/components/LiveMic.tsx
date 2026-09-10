@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Mic, Square, Copy, Check, PictureInPicture2 } from 'lucide-react'
+import { Mic, Square, Copy, Check, PictureInPicture2, Loader2 } from 'lucide-react'
 import { useApp, liveText } from '@/lib/store'
 import { supportsPip } from '@/lib/pip'
 import { cn, formatTime } from '@/lib/utils'
@@ -49,21 +49,37 @@ export function LiveMic() {
         ? 'Paused'
         : 'Ready'
 
+  // One primary control, four states. Continue is the primary on a paused session, so there is
+  // never a Record and a Continue asking for the same press.
+  const primaryLabel = recording
+    ? 'Stop'
+    : transcribing
+      ? 'Stop'
+      : paused
+        ? 'Continue'
+        : 'Record'
+  const primaryDisabled = transcribing || blocked
+  const primaryRef = useRef<HTMLButtonElement>(null)
+  const refocus = useRef(false)
+  useEffect(() => {
+    if (primaryDisabled || !refocus.current) return
+    refocus.current = false
+    primaryRef.current?.focus()
+  }, [primaryDisabled])
+
   return (
     <div className="flex flex-col items-center gap-8">
       {/* Record, the one accent on the screen. */}
       <div className="flex flex-col items-center gap-4">
         <button
-          onClick={() => void (recording ? stopLive() : startLive())}
-          disabled={transcribing || blocked}
-          title={
-            blocked
-              ? 'A transcription is already running'
-              : recording
-                ? 'Stop recording'
-                : 'Start recording'
-          }
-          aria-label={recording ? 'Stop recording' : 'Start recording'}
+          ref={primaryRef}
+          onClick={() => {
+            refocus.current = true
+            void (recording ? stopLive() : paused ? continueLive() : startLive())
+          }}
+          disabled={primaryDisabled}
+          title={blocked ? 'A transcription is already running' : primaryLabel}
+          aria-label={primaryLabel}
           className={cn(
             'grid size-24 place-items-center rounded-full bg-primary text-primary-foreground outline-none transition-colors',
             'hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background',
@@ -71,7 +87,9 @@ export function LiveMic() {
             recording && 'lt-recording',
           )}
         >
-          {recording ? (
+          {transcribing ? (
+            <Loader2 className="size-8 animate-spin" />
+          ) : recording ? (
             <Square className="size-7 fill-current" />
           ) : (
             <Mic className="size-8" />
@@ -79,6 +97,7 @@ export function LiveMic() {
         </button>
 
         <div className="flex flex-col items-center gap-1.5">
+          <span className="text-sm font-medium">{primaryLabel}</span>
           <span className="lt-num text-3xl font-light tracking-tight">
             {formatTime(live?.seconds ?? 0)}
           </span>
@@ -113,16 +132,6 @@ export function LiveMic() {
 
       {/* Actions. */}
       <div className="flex w-full flex-wrap items-center justify-center gap-2">
-        {recording && (
-          <Button variant="outline" onClick={() => void stopLive()}>
-            <Square className="size-3.5 fill-current" /> Stop
-          </Button>
-        )}
-        {paused && (
-          <Button variant="outline" onClick={() => void continueLive()}>
-            <Mic className="size-4" /> Continue
-          </Button>
-        )}
         <Button variant="outline" disabled={!text} onClick={() => void copy()}>
           {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
           {copied ? 'Copied' : 'Copy'}
@@ -150,6 +159,11 @@ export function LiveMic() {
       </div>
 
       {/* Quiet notes: one muted line each, never a red box. */}
+      {supportsPip() && (
+        <p className="-mt-6 text-xs text-muted-foreground">
+          Opens by itself when you switch tabs while recording. Closes when you come back.
+        </p>
+      )}
       {!supportsPip() && (
         <p className="text-xs text-muted-foreground">
           The floating window needs Chrome or Edge.
