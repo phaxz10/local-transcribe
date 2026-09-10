@@ -14,6 +14,7 @@ import { detectCapability, estimateEta } from './capability'
 import { RETIRED, buildCatalog, recommendModel } from './catalog'
 import {
   deleteRecordingChunks,
+  deleteTranscript,
   getMediaAsset,
   getRecordingChunks,
   getSetting,
@@ -376,8 +377,11 @@ interface AppState {
   /** Re-dispatch the last failed job. */
   retryJob: () => void
   dismissJobNotice: () => void
+  setJobNotice: (n: JobNotice | null) => void
   /** Open a transcript by id (loads its media). Used by History and the ready-banner. */
   openTranscript: (id: string) => Promise<void>
+  /** Delete a transcript (and its media, if no other transcript references it), then return to History. */
+  deleteRecord: (id: string) => Promise<void>
 
   setWorkspaceTab: (t: 'file' | 'live') => void
   /** Open the mic and start a fresh Live Session. */
@@ -764,6 +768,7 @@ export const useApp = create<AppState>((set, get) => ({
     else if (notice.retry === 'rerun') void get().runRerunJob()
   },
   dismissJobNotice: () => set({ jobNotice: null }),
+  setJobNotice: (jobNotice) => set({ jobNotice }),
   openTranscript: async (id) => {
     const s = get()
     const rec = s.history.find((r) => r.id === id) ?? (s.record?.id === id ? s.record : null)
@@ -776,6 +781,16 @@ export const useApp = create<AppState>((set, get) => ({
       const asset = await getMediaAsset(rec.source.mediaId).catch(() => undefined)
       if (asset) get().setMediaUrl(URL.createObjectURL(asset.blob))
     }
+  },
+
+  deleteRecord: async (id) => {
+    await deleteTranscript(id)
+    set({ record: null })
+    get().setMediaUrl(null)
+    await get().refreshHistory()
+    get().setView('history')
+    const live = get().live
+    if (live?.status === 'paused' && live.recordId === id) await get().discardLive()
   },
 
   setWorkspaceTab: (workspaceTab) => set({ workspaceTab }),

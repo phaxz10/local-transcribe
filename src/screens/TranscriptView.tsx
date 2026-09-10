@@ -1,5 +1,15 @@
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+} from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
@@ -13,7 +23,7 @@ import {
   mergeSegmentWithNext,
   splitSegment,
 } from '@/lib/edit-ops'
-import { downloadText, exportTranscript } from '@/lib/exporters'
+import { downloadBlob, downloadText, exportTranscript } from '@/lib/exporters'
 import {
   buildFlatWords,
   findActiveWord,
@@ -339,6 +349,8 @@ export function TranscriptView() {
   const refreshHistory = useApp((s) => s.refreshHistory)
   const canUndo = useApp((s) => s.past.length > 0)
   const canRedo = useApp((s) => s.future.length > 0)
+  const deleteRecord = useApp((s) => s.deleteRecord)
+  const setJobNotice = useApp((s) => s.setJobNotice)
 
   const audioRef = useRef<HTMLAudioElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -602,6 +614,20 @@ export function TranscriptView() {
     downloadText(`${base}.${ext}`, text, mime)
   }
 
+  async function downloadAudio() {
+    const mediaId = record!.source.mediaId
+    if (!mediaId) return
+    const asset = await getMediaAsset(mediaId)
+    if (!asset) {
+      setJobNotice({ kind: 'error', label: record!.source.filename, message: 'Stored audio is missing.' })
+      return
+    }
+    const filename = record!.source.hash.startsWith('live:')
+      ? `${record!.source.filename.replace(/\.[^.]+$/, '')}.wav`
+      : record!.source.filename
+    downloadBlob(filename, asset.blob)
+  }
+
   // The rerun job (if any) lives in the store now, so it survives leaving this view.
   const rerunJob = job && job.kind === 'rerun' ? job : null
   const rerunLabel =
@@ -750,6 +776,47 @@ export function TranscriptView() {
                 title="Reopen the microphone and append to this recording"
               >
                 <Mic className="size-3.5" /> Continue recording
+              </Button>
+            )}
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={`Delete ${record.source.filename}`}
+                  aria-label={`Delete ${record.source.filename}`}
+                  className="text-muted-foreground hover:text-destructive-soft"
+                >
+                  <Trash2 className="size-3.5" /> Delete
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Delete this transcript?</DialogTitle>
+                  <DialogDescription>
+                    This removes {record.source.filename} and its media from this browser. It
+                    cannot be undone.
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button variant="ghost">Cancel</Button>
+                  </DialogClose>
+                  <Button variant="destructive" onClick={() => void deleteRecord(record.id)}>
+                    Delete
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+            {record.source.mediaId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                title="Download audio"
+                aria-label="Download audio"
+                onClick={() => void downloadAudio()}
+              >
+                <Download className="size-3.5" /> Download audio
               </Button>
             )}
             <span className="mx-1 hidden h-4 w-px bg-border sm:block" />

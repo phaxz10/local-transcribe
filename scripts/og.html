@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Scribe by BearLog OG card</title>
+    <style>
+      @font-face {
+        font-family: 'Archivo Variable';
+        font-weight: 100 900;
+        font-stretch: 62% 125%;
+        src: url('../node_modules/@fontsource-variable/archivo/files/archivo-latin-standard-normal.woff2')
+          format('woff2-variations');
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        width: 1200px;
+        height: 630px;
+        background: #f1ede5;
+        color: #2a2118;
+        font-family: system-ui, sans-serif;
+        overflow: hidden;
+      }
+
+      .card {
+        width: 1200px;
+        height: 630px;
+        display: flex;
+        align-items: center;
+        padding: 0 88px;
+        position: relative;
+      }
+
+      .mark {
+        flex: 0 0 auto;
+        width: 160px;
+        height: 160px;
+        margin-right: 56px;
+      }
+
+      .mark svg {
+        width: 160px;
+        height: 160px;
+        display: block;
+      }
+
+      .copy {
+        flex: 1 1 auto;
+      }
+
+      .wordmark {
+        font-family: 'Archivo Variable', Archivo, system-ui, sans-serif;
+        font-weight: 800;
+        font-stretch: 125%;
+        font-size: 108px;
+        line-height: 1;
+        letter-spacing: -1px;
+        margin: 0 0 28px 0;
+        color: #2a2118;
+      }
+
+      .tagline {
+        font-size: 34px;
+        line-height: 1.3;
+        margin: 0 0 22px 0;
+        color: #2a2118;
+        max-width: 760px;
+      }
+
+      .rule {
+        width: 120px;
+        height: 4px;
+        background: #c05b4a;
+        border: none;
+        margin: 0 0 22px 0;
+      }
+
+      .sub {
+        font-size: 24px;
+        color: #6b5a41;
+        margin: 0;
+      }
+
+      .corner {
+        position: absolute;
+        right: 56px;
+        bottom: 40px;
+        font-family: ui-monospace, 'SF Mono', 'Cascadia Mono', monospace;
+        font-size: 20px;
+        color: #6b5a41;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="mark">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#c05b4a"/><circle cx="17" cy="18" r="9" fill="#f1ede5"/><circle cx="47" cy="18" r="9" fill="#f1ede5"/><circle cx="32" cy="34" r="19" fill="#f1ede5"/><circle cx="25" cy="28" r="2.2" fill="#c05b4a"/><circle cx="39" cy="28" r="2.2" fill="#c05b4a"/><g fill="#c05b4a"><rect x="23" y="39" width="3" height="5" rx="1.5"/><rect x="27.5" y="36.5" width="3" height="10" rx="1.5"/><rect x="32" y="34" width="3" height="15" rx="1.5"/><rect x="36.5" y="36.5" width="3" height="10" rx="1.5"/><rect x="41" y="39" width="3" height="5" rx="1.5"/></g></svg>
+      </div>
+      <div class="copy">
+        <p class="wordmark">Scribe</p>
+        <p class="tagline">Speech becomes notes, on your own machine.</p>
+        <hr class="rule" />
+        <p class="sub">Free &middot; Private &middot; Runs in your browser</p>
+      </div>
+      <div class="corner">scribe.bearlog.app</div>
+    </div>
+  </body>
+</html>
