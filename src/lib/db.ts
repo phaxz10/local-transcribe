@@ -7,6 +7,13 @@ export interface RecordingChunk {
   pcm: Int16Array
 }
 
+/** One ~8 MB slice of an in-flight model file download (ADR-0008 resume). */
+export interface DownloadPart {
+  url: string
+  index: number
+  blob: Blob
+}
+
 export interface MediaAsset {
   id: string
   blob: Blob
@@ -32,13 +39,18 @@ interface LTDB extends DBSchema {
     key: [string, number]
     value: RecordingChunk
   }
+  /** Bytes already received for a model file, so a cancelled Download resumes (ADR-0008). */
+  downloadParts: {
+    key: [string, number]
+    value: DownloadPart
+  }
 }
 
 let dbp: Promise<IDBPDatabase<LTDB>> | null = null
 
 function db(): Promise<IDBPDatabase<LTDB>> {
   if (!dbp) {
-    dbp = openDB<LTDB>('local-transcribe', 3, {
+    dbp = openDB<LTDB>('local-transcribe', 4, {
       upgrade(d, oldVersion) {
         if (oldVersion < 1) {
           const t = d.createObjectStore('transcripts', { keyPath: 'id' })
@@ -50,6 +62,9 @@ function db(): Promise<IDBPDatabase<LTDB>> {
         }
         if (oldVersion < 3) {
           d.createObjectStore('recordingChunks', { keyPath: ['sessionId', 'seq'] })
+        }
+        if (oldVersion < 4) {
+          d.createObjectStore('downloadParts', { keyPath: ['url', 'index'] })
         }
       },
     })
@@ -116,6 +131,30 @@ export async function listRecordingSessionIds(): Promise<string[]> {
   return [...new Set(keys.map((k) => k[0]))]
 }
 
+/* ── Download parts (ADR-0008 resume) ── */
+
+const partRange = (url: string) => IDBKeyRange.bound([url, -Infinity], [url, Infinity])
+
+/** Every stored slice of a file, in arrival order. */
+export async function getDownloadParts(url: string): Promise<DownloadPart[]> {
+  const all = await (await db()).getAll('downloadParts', partRange(url))
+  return all.sort((a, b) => a.index - b.index)
+}
+
+export async function putDownloadPart(part: DownloadPart): Promise<void> {
+  await (await db()).put('downloadParts', part)
+}
+
+export async function deleteDownloadParts(url: string): Promise<void> {
+  await (await db()).delete('downloadParts', partRange(url))
+}
+
+/** Distinct file URLs with stored slices, i.e. downloads that never finished. */
+export async function listDownloadPartUrls(): Promise<string[]> {
+  const keys = await (await db()).getAllKeys('downloadParts')
+  return [...new Set(keys.map((k) => k[0]))]
+}
+
 export async function getSetting<T>(key: string): Promise<T | undefined> {
   return (await db()).get('settings', key) as Promise<T | undefined>
 }
@@ -131,6 +170,7 @@ export async function wipeEverything(): Promise<void> {
   await d.clear('media')
   await d.clear('settings')
   await d.clear('recordingChunks')
+  await d.clear('downloadParts')
   try {
     indexedDB.deleteDatabase('whisper-web')
   } catch {

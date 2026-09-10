@@ -14,9 +14,9 @@ Local-first, in-browser speech-to-text. All transcription runs on the user's dev
 
 ## v1 scope
 
-**In:** model-first onboarding · device-adaptive Catalog with language badges · model download w/ progress · **cancellable Download + per-model Evict + Active-Model switching** (from the reused Catalog — ADR-0008) · Sideload-by-id (any ONNX HF model) · file upload → ffmpeg decode → streaming transcription · two-layer transcript + editor (in-place fix, delete, insert, merge/split, find-&-replace) · word highlight + click-to-seek playback (**isolated highlight, memoized segments** — ADR-0009) · exports (TXT/SRT/VTT/JSON/MD, raw|corrected) · local history (transcript-only) · live mic mode · PWA installable · COI via dev headers + `coi-serviceworker` for prod.
+**In:** model-first onboarding · device-adaptive Catalog with language badges · model download w/ progress · **cancellable Download + per-model Evict + Active-Model switching** (from the reused Catalog — ADR-0008) · Sideload-by-id (any ONNX HF model) · file upload → ffmpeg decode → streaming transcription · two-layer transcript + editor (in-place fix, delete, insert, merge/split, find-&-replace) · word highlight + click-to-seek playback (**isolated highlight, memoized segments** — ADR-0009) · exports (TXT/SRT/VTT/JSON/MD, raw|corrected) · local history (transcript-only) · live mic mode · PWA installable + offline app shell · COI via dev headers + our own `public/sw.js` for prod · **resumable Download** (Range prefetch into the engine cache — ADR-0008).
 
-**Out (reserved):** speaker diarization · on-device AI summary · subtitle burn-in · re-timing (drag boundaries) · pre-bundled specialist language models (Sideload-by-id already covers BYO ONNX) · transcript windowing/virtualization (deferred behind a length threshold — ADR-0009) · true download resume (per-shard fetch+cache — ADR-0008).
+**Out (reserved):** speaker diarization · on-device AI summary · subtitle burn-in · re-timing (drag boundaries) · pre-bundled specialist language models (Sideload-by-id already covers BYO ONNX) · transcript windowing/virtualization (shipped instead as `content-visibility: auto` per Segment, which keeps every node findable — ADR-0009) · true download resume (**shipped**: `src/lib/download.ts` prefetches each file with HTTP Range and seeds `transformers-cache` — ADR-0008).
 
 ## Screen flow
 
@@ -37,7 +37,7 @@ Local-first, in-browser speech-to-text. All transcription runs on the user's dev
 6. Editor + exports.
 7. History (IDB).
 8. Live mic.
-9. PWA + coi-serviceworker. Build, browser smoke-test, fix.
+9. PWA + the COI/offline service worker (`public/sw.js`). Build, browser smoke-test, fix.
 10. **Bug-fix pass** — cancellable Downloads + per-model Eviction + Active-Model switching (ADR-0008); Transcript render isolation + memoized Segments + react-scan dev profiler (ADR-0009).
 
 ## Catalog spec
@@ -57,5 +57,5 @@ Local-first, in-browser speech-to-text. All transcription runs on the user's dev
 
 - WebGPU is the fast path (ADR-0007); WASM is the CPU fallback. Per-token confidence isn't exposed by the engine, so the low-confidence highlight is inert (ADR-0007).
 - Safari: nested-worker/threads + missing `deviceMemory` → best-effort.
-- PWA offline + COI both via SW can conflict; v1 prioritizes COI (dev headers + `coi-serviceworker`), full Workbox offline deferred.
+- PWA offline + COI can't be two service workers, so `public/sw.js` does both: it stamps COOP/COEP on every response and cache-first-serves a build-stamped app-shell precache (`/`, `/assets/*`, `/ffmpeg/*`), leaving HuggingFace weights to the engine's own cache.
 - Live mic uses a rolling-window approximation; full VAD endpointing deferred to its own branch.

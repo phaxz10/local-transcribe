@@ -169,7 +169,7 @@ const SegmentRow = memo(function SegmentRow({
   const activeWordId = useActiveWord((s) => (s.segId === seg.id ? s.wordId : null))
   const segStart = seg.words[0]?.start ?? 0
   return (
-    <div className="group flex gap-3 sm:gap-5">
+    <div className="lt-segment group flex gap-3 sm:gap-5">
       <button
         onClick={() => controller.seek(segStart)}
         title="Jump to this point"
@@ -227,7 +227,7 @@ const RawBody = memo(function RawBody({
   return (
     <div className="lt-measure lt-read space-y-4">
       {segments.map((seg) => (
-        <div key={seg.id} className="group flex gap-3 sm:gap-5">
+        <div key={seg.id} className="lt-segment group flex gap-3 sm:gap-5">
           <button
             onClick={() => controller.seek(seg.start)}
             title="Jump to this point"

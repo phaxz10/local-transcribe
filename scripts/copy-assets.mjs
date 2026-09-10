@@ -1,5 +1,5 @@
 // Copies self-hosted runtime assets into public/ so they load same-origin
-// (avoids COEP/CORP issues with CDN-hosted ffmpeg core, and self-registers COI).
+// (avoids COEP/CORP issues with CDN-hosted ffmpeg core).
 import { existsSync, mkdirSync, copyFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -24,12 +24,6 @@ try {
     join(root, 'node_modules/@ffmpeg/core-mt/dist/esm'),
     join(out, 'ffmpeg'),
     ['ffmpeg-core.js', 'ffmpeg-core.wasm', 'ffmpeg-core.worker.js'],
-  )
-  // cross-origin-isolation service worker → public/
-  copyInto(
-    join(root, 'node_modules/coi-serviceworker'),
-    out,
-    ['coi-serviceworker.js'],
   )
   console.log('[copy-assets] done')
 } catch (err) {

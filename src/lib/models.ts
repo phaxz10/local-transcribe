@@ -9,7 +9,7 @@
  * Cache Storage is the source of truth. `reconcile` self-corrects a stale index (e.g. an
  * entry the browser evicted under storage pressure). `evictModel` is the inverse of Provision.
  */
-import { getSetting, setSetting } from './db'
+import { deleteDownloadParts, getSetting, listDownloadPartUrls, setSetting } from './db'
 
 const WEIGHTS_CACHE = 'transformers-cache'
 const HASH_CACHE = 'experimental_transformers-hash-cache'
@@ -81,9 +81,9 @@ async function cachedBytes(hfId: string): Promise<number> {
 }
 
 /**
- * Evict a model's weights from Cache Storage (+ its LFS-hash entries) and drop it from the
- * provisioned index. The inverse of Provision. Transcripts and settings are untouched.
- * Reused by the interrupted-Download cleanup to purge a broken partial.
+ * Evict a model's weights from Cache Storage (+ its LFS-hash entries and any resumable
+ * `downloadParts` rows) and drop it from the provisioned index. The inverse of Provision.
+ * Transcripts and settings are untouched.
  */
 export async function evictModel(hfId: string, id?: string): Promise<void> {
   if (hasCaches()) {
@@ -96,6 +96,12 @@ export async function evictModel(hfId: string, id?: string): Promise<void> {
         /* ignore */
       }
     }
+  }
+  try {
+    const urls = (await listDownloadPartUrls()).filter((u) => urlMatchesHfId(u, hfId))
+    await Promise.all(urls.map(deleteDownloadParts))
+  } catch {
+    /* ignore */
   }
   if (id) await unmarkProvisioned(id)
 }

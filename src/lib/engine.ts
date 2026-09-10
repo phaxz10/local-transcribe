@@ -15,7 +15,7 @@ import type {
   WorkerRequest,
 } from './engine.worker'
 import { evictModel } from './models'
-import { CancelledError } from './cancel'
+import { CancelledError, isCancelled as isCancelledError } from './cancel'
 
 export { isCancelled } from './cancel'
 export type { ASRChunk, ASRResult, LoadStatus, TranscribeProgress } from './engine.worker'
@@ -126,9 +126,9 @@ export interface GetEngineOpts {
 /**
  * Load (or reuse) the Engine for a model on a device in the worker; resolves to the device
  * actually in use after the WebGPU→WASM fallback.
- * Cancellable via `opts.signal`: on abort the worker is terminated and any partial weights are
- * Evicted so a retry starts clean (the Cache API has no resume). Rejects `CancelledError` on
- * abort; on a genuine load failure the partial is Evicted too and the error rethrown.
+ * Cancellable via `opts.signal`: on abort the worker is terminated but whatever `download.ts`
+ * already banked is KEPT, so the next attempt resumes (ADR-0008). A genuine load failure still
+ * Evicts the partial, since a broken file would otherwise resume forever.
  */
 export async function getEngine(
   model: CatalogModel,
@@ -145,7 +145,8 @@ export async function getEngine(
     })
     return done.device ?? device
   } catch (e) {
-    await evictModel(model.hfId).catch(() => {}) // purge partial
+    // Cancel keeps the partial on purpose: that is what makes a Download resumable.
+    if (!isCancelledError(e)) await evictModel(model.hfId).catch(() => {}) // purge broken partial
     throw e
   }
 }
@@ -229,7 +230,9 @@ export async function transcribeWithEngine(
     )
     return done.result ?? { text: '' }
   } catch (e) {
-    if (lastDevice === null) await evictModel(model.hfId).catch(() => {}) // purge partial
+    if (lastDevice === null && !isCancelledError(e)) {
+      await evictModel(model.hfId).catch(() => {}) // purge broken partial (cancel keeps it)
+    }
     throw e
   }
 }

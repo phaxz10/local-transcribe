@@ -13,3 +13,8 @@ Virtualization (windowing) would cut DOM nodes, but it **breaks native Cmd-F fin
 - Playback time leaves React state *for the list's purposes*; a small dedicated subscription carries only `activeWordId`. Segment rows must stay referentially stable for `React.memo` to pay off — the edit-ops already return new arrays only for the Segments that changed, which the memo relies on.
 - Very long Transcripts (multi-hour) still render every node. If that ever bites, windowing returns **behind a length threshold** (the deferred option), accepting the find/select trade-off only in that extreme.
 - **react-scan** is wired **dev-only** (an `import.meta.env.DEV`-guarded dynamic import, excluded from the production bundle) as the profiler we use to verify the before/after — full-tree flashes on every tick before, ~2 spans/tick after.
+
+**Update (2026-09):** the deferred windowing is no longer needed — each Segment row carries
+`content-visibility: auto; contain-intrinsic-size: auto 96px` (`.lt-segment`), so the browser skips
+layout and paint for off-screen rows while every node stays in the DOM, keeping Cmd-F and
+select-all across the whole Transcript.

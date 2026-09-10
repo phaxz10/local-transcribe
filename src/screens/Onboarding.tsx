@@ -21,6 +21,7 @@ import {
 import { fitCheck } from '@/lib/capability'
 import { recommendModel } from '@/lib/catalog'
 import { benchmark, getEngine, isCancelled, type LoadStatus } from '@/lib/engine'
+import { downloadModel } from '@/lib/download'
 import { useApp } from '@/lib/store'
 import { PRIMARY_LANGUAGES, type CatalogModel, type PrimaryLanguage } from '@/lib/types'
 import { formatMb } from '@/lib/utils'
@@ -86,6 +87,13 @@ export function Onboarding() {
     setStatus(null)
     setPhase('downloading')
     try {
+      // Fetch the weights ourselves first, with Range resume (ADR-0008), so cancel now keeps the
+      // bytes. `getEngine` then finds every file in `transformers-cache` and reports an instant
+      // load through the same progress channel.
+      await downloadModel(selected, capability.device, {
+        signal: ac.signal,
+        onProgress: setStatus,
+      })
       const device = await getEngine(selected, capability.device, {
         signal: ac.signal,
         onProgress: setStatus,
@@ -224,7 +232,8 @@ export function Onboarding() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Downloads cannot resume. Cancelling means starting over next time.
+                Cancelling keeps what has already downloaded, and picks up from there next
+                time.
               </p>
             </div>
           ) : (
@@ -254,14 +263,15 @@ export function Onboarding() {
         ) : phase === 'cancelled' ? (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
-              Download cancelled. Starting again downloads from the beginning.
+              Download cancelled. What you already downloaded is kept, and starting again picks
+              up where it stopped.
             </p>
             <div className="flex shrink-0 gap-2">
               <Button variant="ghost" onClick={() => setPhase('idle')}>
                 Choose another
               </Button>
               <Button onClick={provision}>
-                <RotateCcw className="size-4" /> Download again
+                <RotateCcw className="size-4" /> Resume download
               </Button>
             </div>
           </div>
