@@ -29,6 +29,18 @@ const PART_BYTES = 8 * 1024 * 1024
 const DTYPE_SUFFIX = { fp32: '', fp16: '_fp16', q8: '_quantized', q4: '_q4', q4f16: '_q4f16' } as const
 type Dtype = keyof typeof DTYPE_SUFFIX
 
+/**
+ * The worker loads Silero VAD alongside *every* ASR model, so it prefetches with every model:
+ * 2.2 MB, one file, no config.json (the repo has none). Cheap insurance that a user who
+ * downloaded a model while online still gets silence gating offline.
+ *
+ * It is a separate hfId on purpose. `evictModel`/`reconcileProvisioned` in `models.ts` key on
+ * `/${hfId}/resolve/`, so evicting an ASR model leaves the shared VAD in place and reconcile
+ * never counts it as belonging to one — no change needed there.
+ */
+const VAD_HF_ID = 'onnx-community/silero-vad'
+const VAD_FILES = ['onnx/model.onnx']
+
 const CONFIG_FILES = [
   'config.json',
   'generation_config.json',
@@ -37,6 +49,20 @@ const CONFIG_FILES = [
   'tokenizer_config.json',
 ]
 
+/** Mirror of `DTYPE_OVERRIDES` in `engine.worker.ts` (the "why" lives there). Cohere Transcribe
+ * has no CPU build at all — `dtypeFor` throws on WASM — so its q4f16 is listed for both devices:
+ * a prefetch that never gets loaded is wasteful, a missing one would be broken. */
+const DTYPE_OVERRIDES: Record<
+  string,
+  Partial<Record<EngineDevice, { encoder: Dtype; decoder: Dtype }>>
+> = {
+  'onnx-community/whisper-small-cantonese-ONNX': { webgpu: { encoder: 'fp16', decoder: 'q4' } },
+  'onnx-community/cohere-transcribe-03-2026-ONNX': {
+    webgpu: { encoder: 'q4f16', decoder: 'q4f16' },
+    wasm: { encoder: 'q4f16', decoder: 'q4f16' },
+  },
+}
+
 /**
  * Mirror of `dtypeFor` in `engine.worker.ts`: that is the SOURCE OF TRUTH and carries the "why"
  * for every choice. It can't be imported here: it lives in a module that pulls in the whole
@@ -44,8 +70,8 @@ const CONFIG_FILES = [
  * this prefetches files nobody then loads (wasteful, not broken).
  */
 function dtypesFor(model: CatalogModel, device: EngineDevice): { encoder: Dtype; decoder: Dtype } {
-  // Cohere Transcribe is WebGPU-only and has exactly one usable dtype; `dtypeFor` throws on WASM.
-  if (model.family === 'cohere-transcribe') return { encoder: 'q4f16', decoder: 'q4f16' }
+  const override = DTYPE_OVERRIDES[model.hfId]?.[device]
+  if (override) return override
   const large = model.family === 'large-v3-turbo'
   if (device === 'webgpu') {
     return large ? { encoder: 'fp16', decoder: 'q4' } : { encoder: 'fp16', decoder: 'fp16' }
@@ -66,14 +92,27 @@ function dtypesFor(model: CatalogModel, device: EngineDevice): { encoder: Dtype;
  * through the same `getModelFile` path we seed. It also needs `processor_config.json`
  * (`CohereAsrProcessor.uses_processor_config = true`), which no Whisper export has.
  */
-export function modelFiles(model: CatalogModel, device: EngineDevice): string[] {
+export function modelFiles(
+  model: CatalogModel,
+  device: EngineDevice,
+): Array<{ hfId: string; file: string }> {
   const { encoder, decoder } = dtypesFor(model, device)
+  const own = (file: string) => ({ hfId: model.hfId, file })
   const enc = `onnx/encoder_model${DTYPE_SUFFIX[encoder]}.onnx`
   const dec = `onnx/decoder_model_merged${DTYPE_SUFFIX[decoder]}.onnx`
+  const vad = VAD_FILES.map((file) => ({ hfId: VAD_HF_ID, file }))
   if (model.family === 'cohere-transcribe') {
-    return [...CONFIG_FILES, 'processor_config.json', enc, `${enc}_data`, dec, `${dec}_data`]
+    return [
+      ...CONFIG_FILES.map(own),
+      own('processor_config.json'),
+      own(enc),
+      own(`${enc}_data`),
+      own(dec),
+      own(`${dec}_data`),
+      ...vad,
+    ]
   }
-  return [...CONFIG_FILES, enc, dec]
+  return [...CONFIG_FILES.map(own), own(enc), own(dec), ...vad]
 }
 
 export function fileUrl(hfId: string, file: string): string {
@@ -140,7 +179,7 @@ export async function downloadModel(
 
   const cache = await caches.open(WEIGHTS_CACHE)
   const plans: FilePlan[] = []
-  for (const file of modelFiles(model, device)) plans.push(await planFile(cache, model.hfId, file))
+  for (const { hfId, file } of modelFiles(model, device)) plans.push(await planFile(cache, hfId, file))
 
   const totalBytes = plans.reduce((n, p) => n + p.size, 0)
   let doneBytes = plans.reduce((n, p) => n + (p.cached ? p.size : 0), 0)
