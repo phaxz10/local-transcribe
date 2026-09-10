@@ -26,7 +26,7 @@ const REVISION = 'main'
 const PART_BYTES = 8 * 1024 * 1024
 
 /** Verified against DEFAULT_DTYPE_SUFFIX_MAPPING in @huggingface/transformers v4.2.0. */
-const DTYPE_SUFFIX = { fp32: '', fp16: '_fp16', q8: '_quantized', q4: '_q4' } as const
+const DTYPE_SUFFIX = { fp32: '', fp16: '_fp16', q8: '_quantized', q4: '_q4', int8: '_int8', q4f16: '_q4f16' } as const
 type Dtype = keyof typeof DTYPE_SUFFIX
 
 const CONFIG_FILES = [
@@ -58,6 +58,14 @@ function dtypesFor(model: CatalogModel, device: EngineDevice): { encoder: Dtype;
  * candidate 404s on the Hub.)
  */
 export function modelFiles(model: CatalogModel, device: EngineDevice): string[] {
+  if (model.family === 'parakeet-ctc') {
+    // One `onnx/model_<dtype>.onnx` + its `.onnx_data` sibling (config.json declares
+    // `transformers.js_config.use_external_data_format: true`, which the loader resolves to exactly
+    // one `<file>.onnx_data` chunk). The repo has NO generation_config.json (404), and the tokenizer
+    // loader only ever asks for tokenizer.json + tokenizer_config.json.
+    const onnx = `onnx/model${DTYPE_SUFFIX[device === 'webgpu' ? 'q4f16' : 'int8']}.onnx`
+    return [...CONFIG_FILES.filter((f) => f !== 'generation_config.json'), onnx, `${onnx}_data`]
+  }
   const { encoder, decoder } = dtypesFor(model, device)
   return [
     ...CONFIG_FILES,

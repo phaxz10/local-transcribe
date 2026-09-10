@@ -10,7 +10,7 @@ import type {
   TranscriptRecord,
 } from './types'
 import { detectCapability, estimateEta } from './capability'
-import { buildCatalog, recommendModel } from './catalog'
+import { RETIRED, buildCatalog, recommendModel } from './catalog'
 import {
   deleteRecordingChunks,
   getMediaAsset,
@@ -415,8 +415,12 @@ export const useApp = create<AppState>((set, get) => ({
 
     // Reconcile the provisioned-id hint against Cache Storage truth (ADR-0008).
     const idToHf = new Map(catalog.map((m) => [m.id, m.hfId]))
-    const resolveHf = (id: string): string | null => idToHf.get(id) ?? null
+    // RETIRED ids resolve too, so reconcile reports the ones still cached instead of silently
+    // dropping the index entry and orphaning ~500 MB of weights nothing in the UI can reach.
+    const resolveHf = (id: string): string | null => idToHf.get(id) ?? RETIRED[id] ?? null
     const provisioned = await reconcileProvisioned(resolveHf).catch(() => [] as string[])
+    const retired = provisioned.filter((id) => id in RETIRED)
+    for (const id of retired) await evictModel(RETIRED[id], id).catch(() => {})
 
     // Restore the Active Model only if its weights are still cached.
     let activeModel: CatalogModel | null = savedModelId
@@ -434,11 +438,18 @@ export const useApp = create<AppState>((set, get) => ({
       capability: { ...capability, benchmarkRtf: savedRtf ?? null },
       catalog,
       history,
-      provisioned,
+      provisioned: provisioned.filter((id) => !(id in RETIRED)),
       primaryLanguage: savedLang,
       activeModel,
       ready: true,
       view: initialView,
+      jobNotice: retired.length
+        ? {
+            kind: 'error',
+            label: 'Model retired',
+            message: 'Small (English) was replaced by Parakeet (English). Download it from Models.',
+          }
+        : null,
     })
 
     // Never block boot on it: a recovered recording is a bonus, not a precondition.

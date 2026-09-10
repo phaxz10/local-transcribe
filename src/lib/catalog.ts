@@ -1,14 +1,25 @@
 import type { CapabilityReport, CatalogModel, PrimaryLanguage } from './types'
 
-const FAMILY_ORDER: CatalogModel['family'][] = ['small', 'large-v3-turbo']
+const FAMILY_ORDER: CatalogModel['family'][] = ['small', 'parakeet-ctc', 'large-v3-turbo']
 
 type Entry = Omit<CatalogModel, 'available'>
 
-// ONNX Whisper models loaded by Transformers.js (ADR-0007). Sizes are approximate.
+/**
+ * Catalog ids that used to exist, mapped to the hfId whose weights must be evicted when an old
+ * install still has them cached. `store.init()` reads this; see the `small.en` note below.
+ */
+export const RETIRED: Record<string, string> = { 'small.en': 'Xenova/whisper-small.en' }
+
+// ONNX models loaded by Transformers.js (ADR-0007). Sizes are approximate.
 // Deliberately scoped to Small (the smallest tier that doesn't hallucinate/loop on hard audio)
 // and Large v3 Turbo, the tiny/base tiers were dropped because they loop on real meetings.
+// 2026-09: `small.en` was dropped too, it produced no usable transcript on real audio; English is
+// now Parakeet CTC, which is non-autoregressive and so structurally cannot loop at all.
 const ENTRIES: Entry[] = [
-  { id: 'small.en', label: 'Small (English)', task: 'transcription', family: 'small', hfId: 'Xenova/whisper-small.en', englishOnly: true, multilingual: false, sizeMb: 520, ramCeilingMb: 1200, requiresWebGPU: false, languages: { en: 3 } },
+  // Non-autoregressive CTC: no decoder, no sampling, no repetition-hallucination by construction.
+  // v4.2.0's ASR pipeline routes `parakeet_ctc` down the wav2vec2 branch, which returns text only,
+  // so the worker aligns word timestamps from the CTC frames itself (see `transcribeCtc`).
+  { id: 'parakeet-en', label: 'Parakeet (English)', task: 'transcription', family: 'parakeet-ctc', hfId: 'onnx-community/parakeet-ctc-0.6b-ONNX', englishOnly: true, multilingual: false, sizeMb: 612, ramCeilingMb: 1250, requiresWebGPU: false, languages: { en: 3 } },
   { id: 'small', label: 'Small', task: 'transcription', family: 'small', hfId: 'Xenova/whisper-small', englishOnly: false, multilingual: true, sizeMb: 520, ramCeilingMb: 1200, requiresWebGPU: false, languages: { en: 2, zh: 2, ja: 2, yue: 1, tl: 2 } },
   // We request word-level timestamps (return_timestamps: 'word'), which needs a decoder exported
   // WITH cross-attentions. The canonical `whisper-large-v3-turbo` export lacks them and throws

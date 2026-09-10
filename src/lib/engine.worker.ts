@@ -82,14 +82,30 @@ export type WorkerEvent =
 
 /* ── Pipeline ─────────────────────────────────────────────────────────────── */
 
+/** The bits of a Transformers.js Tensor the CTC alignment below touches. */
+interface LogitsTensor {
+  dims: number[]
+  to(type: 'float32'): { data: { [i: number]: number } }
+}
+
 // Transformers.js ASR pipeline type is complex; alias loosely.
 type ASR = Awaited<ReturnType<typeof pipeline>> & {
   (audio: Float32Array, opts?: Record<string, unknown>): Promise<ASRResult>
-  tokenizer: unknown
+  tokenizer: { model: { vocab: string[] } }
+  /** Reached directly only on the CTC path (see `transcribeCtc`). */
+  model: ((inputs: unknown) => Promise<{ logits: LogitsTensor }>) & {
+    config: { model_type?: string; pad_token_id?: number }
+  }
+  processor: (audio: Float32Array) => Promise<unknown>
   dispose?: () => Promise<void>
 }
 
 function dtypeFor(model: CatalogModel, device: EngineDevice): unknown {
+  // Parakeet CTC ships ONE `onnx/model_<dtype>.onnx` (+ external `.onnx_data`), no encoder/decoder
+  // split, so the dtype is a single string. int8 is safe here: the "never an int8 encoder" rule
+  // below is WHISPER-specific (an autoregressive decoder amplifies encoder noise into a repetition
+  // loop). A CTC model emits one label per frame and cannot loop, so it takes the small download.
+  if (model.family === 'parakeet-ctc') return device === 'webgpu' ? 'q4f16' : 'int8'
   const large = model.family === 'large-v3-turbo'
   if (device === 'webgpu') {
     // large-v3-turbo: fp16 encoder + 4-bit decoder. (The onnx-community fp16 *merged decoder* trips
@@ -329,6 +345,54 @@ function hasDetectableSignal(pcm: Int16Array): boolean {
   return false
 }
 
+/**
+ * One encoder frame = 10 ms mel hop (`hop_length` 160 @ 16 kHz) × `subsampling_factor` 8 = 80 ms.
+ * Both numbers come from the repo's own preprocessor_config.json / config.json.
+ */
+const CTC_FRAME_SECONDS = 0.08
+
+/**
+ * Word timestamps for a CTC model, by hand.
+ *
+ * v4.2.0's ASR pipeline sends `parakeet_ctc` down the `_call_wav2vec2` branch, which greedy-decodes
+ * and returns `{ text }` ONLY — it ignores `return_timestamps` entirely, so `buildAsrLayer` would
+ * get one word for a whole 25 s chunk. So we run the processor + model ourselves: argmax per frame,
+ * drop the CTC blank (`pad_token_id`) and repeats, then start a new word at each SentencePiece `▁`.
+ * `.to('float32')` is a no-op on the WASM (int8) path and the correct decode on WebGPU's q4f16.
+ *
+ * ponytail: greedy argmax with no CTC emission-lag compensation, so a word's start can read a frame
+ * or two (≤160 ms) late. Fine for playback highlighting and SRT; if it ever isn't, the fix is a
+ * peak-shift per token, not a beam search.
+ */
+async function transcribeCtc(asr: ASR, wave: Float32Array, offsetSeconds: number): Promise<ASRResult> {
+  const { logits } = await asr.model(await asr.processor(wave))
+  const [, frames, vocab] = logits.dims
+  const data = logits.to('float32').data
+  const blank = asr.model.config.pad_token_id ?? vocab - 1
+  const pieces = asr.tokenizer.model.vocab
+  const chunks: ASRChunk[] = []
+  let prev = -1
+  for (let t = 0; t < frames; t++) {
+    const row = t * vocab
+    let best = 0
+    for (let v = 1; v < vocab; v++) if (data[row + v] > data[row + best]) best = v
+    const repeated = best === prev
+    prev = best
+    if (best === blank || best === 0 /* <unk> */ || repeated) continue
+    const piece = pieces[best] ?? ''
+    const start = offsetSeconds + t * CTC_FRAME_SECONDS
+    const last = chunks[chunks.length - 1]
+    if (last && !piece.startsWith('▁')) {
+      last.text += piece
+      last.timestamp[1] = start + CTC_FRAME_SECONDS
+    } else {
+      chunks.push({ text: piece.replace('▁', ''), timestamp: [start, start + CTC_FRAME_SECONDS] })
+    }
+  }
+  const words = chunks.filter((c) => c.text)
+  return { text: words.map((c) => c.text).join(' '), chunks: words }
+}
+
 async function transcribeOne(
   asr: ASR,
   wave: Float32Array,
@@ -337,6 +401,16 @@ async function transcribeOne(
   committedText: string,
   onPartial: (text: string) => void,
 ): Promise<ASRResult> {
+  // CTC path: no generation at all, so none of the decode knobs below apply — no language/task
+  // (the pipeline only warns, but they mean nothing), no max_new_tokens/no_repeat_ngram_size/
+  // do_sample, and no temperature retry, since a non-autoregressive model has no loop to escape.
+  // There is no token stream either, so the live partial lands once per chunk instead of per token.
+  if (asr.model.config.model_type === 'parakeet_ctc') {
+    const out = await transcribeCtc(asr, wave, offsetSeconds)
+    if (opts.partial) onPartial(normalizePartial(`${committedText} ${out.text}`))
+    return out
+  }
+
   // Fresh streamer per attempt, so a failed-then-retried run doesn't double the live partial.
   const run = async (extra: Record<string, unknown>): Promise<ASRResult> => {
     let streamer: WhisperTextStreamer | undefined

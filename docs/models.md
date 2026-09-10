@@ -14,7 +14,7 @@ Already supported by the engine; these are Catalog drop-ins.
 | Need | HF id | ~Size | Device | Notes |
 |---|---|---|---|---|
 | Default multilingual | `Xenova/whisper-base` · `Xenova/whisper-small` | 210 / 480 MB | WASM ok | Handles zh/ja/ko/th well at `small`+ |
-| English, fast | `Xenova/whisper-base.en` · `Xenova/whisper-small.en` | 210 / 480 MB | WASM ok | `.en` builds, sharper on English |
+| **English** | `onnx-community/parakeet-ctc-0.6b-ONNX` | 612 MB (`int8`) / 455 MB (`q4f16`) | WASM ok | Replaced `Xenova/whisper-small.en` on 2026-09, which produced no usable transcript. NVIDIA Parakeet CTC 0.6B: non-autoregressive, so it **cannot** repetition-loop. Single-file export (`onnx/model_<dtype>.onnx` + `.onnx_data`), no `generation_config.json`. v4.2.0 routes `parakeet_ctc` through the wav2vec2 branch, which returns text only — word timestamps come from our own CTC frame alignment (80 ms/frame). CC-BY-4.0 |
 | Max multilingual | `onnx-community/whisper-large-v3-turbo_timestamped` | ~1.5 GB | **WebGPU only** | Desktop / high-end tier. Must be the **`_timestamped`** export (plain repo lacks cross-attentions → word timestamps throw). Load `encoder_model`=**fp16** + `decoder_model_merged`=**q4**; the fp32 encoder drags in a 2.4 GB `.onnx_data` |
 | **Cantonese ASR** | `alvanlii/whisper-small-cantonese` | ~480 MB | WASM ok | Common Voice `yue` fine-tune — the realistic on-device pick |
 | Cantonese, lower latency | `alvanlii/distil-whisper-small-cantonese` | ~330 MB | WASM ok | Distilled = faster on the S23 |

@@ -80,11 +80,11 @@ export type LangQuality = 0 | 1 | 2 | 3
 export type ModelTask = 'transcription'
 
 export interface CatalogModel {
-  /** Stable catalog id, e.g. "small.en". */
+  /** Stable catalog id, e.g. "parakeet-en". */
   id: string
   label: string
   task: ModelTask
-  family: 'small' | 'large-v3-turbo'
+  family: 'small' | 'parakeet-ctc' | 'large-v3-turbo'
   /** HuggingFace repo id loaded by Transformers.js (ONNX weights). */
   hfId: string
   /** Whether this is the English-only (.en) build. */

@@ -42,7 +42,7 @@ Local-first, in-browser speech-to-text. All transcription runs on the user's dev
 
 ## Catalog spec
 
-`small.en` · multilingual `small` · `large-v3-turbo` (ONNX, loaded by HF id; WebGPU-gated for turbo). Tiny/base tiers were dropped after real meeting audio exposed repetition loops. Quantization is per-device (`fp16`/`q4` on WebGPU, `q8` on WASM). Each entry: `{ id, hfId, label, sizeMb, ramCeilingMb, requiresWebGPU, multilingual, languages: {en,zh,ja,yue,tl,…quality} }`. Recommended = best that passes Fit-check ∧ WebGPU-gate ∧ Primary Language.
+`parakeet-en` · multilingual `small` · `large-v3-turbo` (ONNX, loaded by HF id; WebGPU-gated for turbo). Tiny/base tiers were dropped after real meeting audio exposed repetition loops; `small.en` was dropped in 2026-09 for producing no usable transcript, and English is now Parakeet CTC, which cannot loop by construction. Quantization is per-device (`fp16`/`q4` on WebGPU, `q8` on WASM; Parakeet is a single-file export at `q4f16`/`int8`). Each entry: `{ id, hfId, label, sizeMb, ramCeilingMb, requiresWebGPU, multilingual, languages: {en,zh,ja,yue,tl,…quality} }`. Recommended = best that passes Fit-check ∧ WebGPU-gate ∧ Primary Language.
 
 ## Acceptance criteria
 
