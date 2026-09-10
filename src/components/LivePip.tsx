@@ -1,16 +1,46 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Loader2 } from 'lucide-react'
 import { useApp, liveText } from '@/lib/store'
-import { getPipWindow } from '@/lib/pip'
+import { getPipWindow, installAutoPip, syncAutoPip, syncMediaSession } from '@/lib/pip'
 import { formatTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
+/** Auto PiP applies while the Transcribe page is showing, or while a session is running anywhere. */
+function autoPipEligible(): boolean {
+  const { view, live } = useApp.getState()
+  return view === 'workspace' || live?.status === 'recording' || live?.status === 'transcribing'
+}
+
 /**
- * The Document PiP companion. Mounted once, outside <main>, so it survives every view change , 
+ * The Document PiP companion. Mounted once, outside <main>, so it survives every view change ,
  * and because the store owns the Live Session, its buttons work while the main tab is hidden.
  */
 export function LivePip() {
   const pipOpen = useApp((s) => s.pipOpen)
+
+  // Auto PiP. The action handler has to be registered before the tab hides, so re-sync it on every
+  // change of the two things eligibility is made of: the view, and the session's status.
+  useEffect(() => {
+    let last = ''
+    const apply = () => {
+      const s = useApp.getState()
+      const key = `${s.view}:${s.live?.status ?? 'idle'}`
+      if (key === last) return // the store also ticks once a second while recording
+      last = key
+      syncAutoPip(autoPipEligible())
+      syncMediaSession(s.live?.status === 'recording')
+    }
+    apply()
+    const unsubscribe = useApp.subscribe(apply)
+    const uninstall = installAutoPip(autoPipEligible)
+    return () => {
+      unsubscribe()
+      uninstall()
+      syncAutoPip(false)
+      syncMediaSession(false)
+    }
+  }, [])
 
   // pip.ts copies the root class once, at open time; mirror later theme changes into that window.
   useEffect(() => {
@@ -47,6 +77,15 @@ function PipPanel() {
   const recording = live?.status === 'recording'
   const transcribing = live?.status === 'transcribing'
   const paused = live?.status === 'paused'
+
+  // Stopping disables the primary for a moment, which blurs it; hand focus back when it returns.
+  const primaryRef = useRef<HTMLButtonElement>(null)
+  const refocus = useRef(false)
+  useEffect(() => {
+    if (transcribing || !refocus.current) return
+    refocus.current = false
+    primaryRef.current?.focus()
+  }, [transcribing])
 
   async function copy() {
     const w = getPipWindow()
@@ -107,29 +146,27 @@ function PipPanel() {
       {live?.error && <p className="text-[11px] text-muted-foreground">{live.error}</p>}
 
       <div className="flex flex-wrap gap-1.5">
+        {/* One primary, four states. Same element throughout, so it keeps focus. */}
         <Button
+          ref={primaryRef}
           size="sm"
           disabled={transcribing}
-          onClick={() => void (recording ? stopLive() : startLive())}
+          onClick={() => {
+            refocus.current = true
+            void (recording ? stopLive() : paused ? continueLive() : startLive())
+          }}
         >
-          {recording ? 'Stop' : 'Record'}
+          {transcribing && <Loader2 className="size-3.5 animate-spin" />}
+          {paused ? 'Continue' : recording || transcribing ? 'Stop' : 'Record'}
         </Button>
-        {paused && (
-          <Button size="sm" variant="outline" onClick={() => void continueLive()}>
-            Continue
-          </Button>
-        )}
         <Button size="sm" variant="outline" disabled={!text} onClick={() => void copy()}>
           {copied ? 'Copied' : 'Copy'}
         </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={transcribing}
-          onClick={() => void newLive()}
-        >
-          New
-        </Button>
+        {paused && (
+          <Button size="sm" variant="ghost" onClick={() => void newLive()}>
+            New recording
+          </Button>
+        )}
       </div>
     </div>
   )

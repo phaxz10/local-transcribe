@@ -380,7 +380,8 @@ interface AppState {
   discardLive: () => Promise<void>
   /** Discard and immediately start a new one. */
   newLive: () => Promise<void>
-  openPip: () => Promise<void>
+  /** `silent` swallows the failure: an auto-open with no user activation is expected to reject. */
+  openPip: (silent?: boolean) => Promise<void>
   closePip: () => void
 }
 
@@ -956,11 +957,12 @@ export const useApp = create<AppState>((set, get) => ({
     await get().startLive()
   },
 
-  openPip: async () => {
+  openPip: async (silent) => {
     try {
       await openPipWindow(() => set({ pipOpen: false }))
       set({ pipOpen: true })
     } catch (e) {
+      if (silent) return
       set({
         jobNotice: {
           kind: 'error',
