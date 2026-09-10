@@ -44,7 +44,7 @@ export function HistoryView() {
     <div className="space-y-10">
       <ScreenHeader
         title="History"
-        subtitle="Transcripts are stored in this browser. Media is not kept, so reattach a file to replay."
+        subtitle="Transcripts and their audio are stored in this browser. Nothing is uploaded."
       />
 
       {history.length === 0 ? (
