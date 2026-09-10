@@ -10,6 +10,7 @@
 import { AutoModel, Tensor, pipeline, env, WhisperTextStreamer } from '@huggingface/transformers'
 import type { CatalogModel, EngineDevice } from './types'
 import { interpolateWords, type SpeechRegion } from './interpolate-times'
+import { translationModelId, type TranslationPair } from './translation'
 import {
   MAX_CHUNK_SECONDS,
   VAD_WINDOW_SAMPLES,
@@ -91,6 +92,8 @@ export type WorkerRequest =
       opts: WorkerTranscribeOpts
     }
   | { id: number; type: 'benchmark'; model: CatalogModel; device: EngineDevice }
+  /** Stage two of translation (ADR-0018): one English string back per Segment text. */
+  | { id: number; type: 'translate'; pair: TranslationPair; texts: string[] }
   | { type: 'dispose' }
 
 export type WorkerEvent =
@@ -98,7 +101,14 @@ export type WorkerEvent =
   | { id: number; type: 'progress'; status: TranscribeProgress }
   | { id: number; type: 'partial'; text: string }
   | { id: number; type: 'device'; device: EngineDevice }
-  | { id: number; type: 'done'; device?: EngineDevice; result?: ASRResult; rtf?: number }
+  | {
+      id: number
+      type: 'done'
+      device?: EngineDevice
+      result?: ASRResult
+      rtf?: number
+      translations?: string[]
+    }
   | { id: number; type: 'error'; message: string }
 
 /* ── Pipeline ─────────────────────────────────────────────────────────────── */
@@ -326,6 +336,84 @@ async function loadEngine(
   const built = await buildPipeline(model, device, makeReporter(onProgress))
   current = { key, engine: built.engine, device: built.device }
   return current
+}
+
+/* ── Machine translation (ADR-0018) ───────────────────────────────────────── */
+
+/** The translation pipeline: an array in, `{ translation_text }` per item out. */
+type MT = ((texts: string[], opts?: Record<string, unknown>) => Promise<{ translation_text: string }[]>) & {
+  dispose?: () => Promise<void>
+}
+
+/**
+ * Its OWN slot, separate from the ASR `current`, so switching Transcription Model does not evict a
+ * 113 MB Marian that is about to translate the result of that very run. `dispose` clears both.
+ *
+ * Always WASM: these are int8 Marians of ~75 M params, where GPU dispatch overhead would dominate.
+ */
+let currentMt: { pair: TranslationPair; engine: MT } | null = null
+
+async function disposeMt(): Promise<void> {
+  const m = currentMt
+  currentMt = null
+  try {
+    await m?.engine.dispose?.()
+  } catch {
+    /* ignore */
+  }
+}
+
+async function loadMt(pair: TranslationPair, onProgress?: (s: LoadStatus) => void): Promise<MT> {
+  if (currentMt?.pair === pair) return currentMt.engine
+  if (currentMt) await disposeMt()
+  const engine = (await pipeline('translation', translationModelId(pair), {
+    device: 'wasm',
+    dtype: 'q8',
+    // onnxruntime-web's extended QDQ pass chokes on this export's shared embedding:
+    // "TransposeDQWeightsForMatMulNBits Missing required scale: model.shared.weight_merged_0_scale".
+    // `basic` skips that whole family of rewrites; on a 77 M-param Marian the lost fusions cost
+    // nothing we can measure, and the alternative is the ~310 MB fp32 graph.
+    session_options: { graphOptimizationLevel: 'basic' },
+    progress_callback: makeReporter(onProgress) as never,
+  })) as unknown as MT
+  currentMt = { pair, engine }
+  return engine
+}
+
+/** Texts per generate call. Marian pads to the longest member, so a big batch wastes decode. */
+const MT_BATCH = 8
+
+async function translateTexts(
+  engine: MT,
+  texts: string[],
+  onProgress: (s: TranscribeProgress) => void,
+): Promise<string[]> {
+  const out = texts.map(() => '')
+  const todo = texts.map((_, i) => i).filter((i) => texts[i].trim())
+  // Empty Segments cost nothing and are already "done", so the ratio doesn't stall on them.
+  let done = texts.length - todo.length
+  const report = () =>
+    onProgress({
+      ratio: texts.length ? done / texts.length : 1,
+      chunkIndex: done,
+      chunkCount: texts.length,
+      completedSeconds: 0,
+      totalSeconds: 0,
+    })
+  report()
+  for (let at = 0; at < todo.length; at += MT_BATCH) {
+    const slice = todo.slice(at, at + MT_BATCH)
+    const batch = slice.map((i) => texts[i])
+    const longest = Math.max(...batch.map((t) => [...t].length))
+    const res = await engine(batch, {
+      // ~4 tokens per source character is generous for zh/ja→en; the cap stops a runaway decode.
+      max_new_tokens: Math.min(256, 4 * longest + 16),
+    })
+    slice.forEach((i, k) => (out[i] = (res[k]?.translation_text ?? '').trim()))
+    done += slice.length
+    report()
+  }
+  return out
 }
 
 /* ── Transcription ────────────────────────────────────────────────────────── */
@@ -794,6 +882,15 @@ async function handle(req: Exclude<WorkerRequest, { type: 'dispose' }>): Promise
     return
   }
 
+  if (req.type === 'translate') {
+    const engine = await loadMt(req.pair, (status) => post({ id, type: 'loadProgress', status }))
+    const translations = await translateTexts(engine, req.texts, (status) =>
+      post({ id, type: 'progress', status }),
+    )
+    post({ id, type: 'done', translations })
+    return
+  }
+
   if (req.type === 'benchmark') {
     const { engine } = await loadEngine(req.model, req.device)
     const secs = 4,
@@ -846,7 +943,10 @@ let queue: Promise<unknown> = Promise.resolve()
 self.onmessage = (e: MessageEvent<WorkerRequest>) => {
   const req = e.data
   if (req.type === 'dispose') {
-    queue = queue.then(() => disposeCurrent())
+    queue = queue.then(async () => {
+      await disposeCurrent()
+      await disposeMt()
+    })
     return
   }
   queue = queue.then(() =>

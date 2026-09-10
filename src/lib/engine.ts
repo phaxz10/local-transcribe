@@ -14,6 +14,7 @@ import type {
   WorkerEvent,
   WorkerRequest,
 } from './engine.worker'
+import type { TranslationPair } from './translation'
 import { evictModel } from './models'
 import { CancelledError, isCancelled as isCancelledError } from './cancel'
 
@@ -238,6 +239,35 @@ export async function transcribeWithEngine(
     }
     throw e
   }
+}
+
+export interface TranslateOpts {
+  signal?: AbortSignal
+  onProgress?: (s: TranscribeProgress) => void
+  onLoadProgress?: LoadProgress
+}
+
+/**
+ * Machine-translate Segment texts into English (ADR-0018). One output per input, empty in → empty
+ * out. The MT pipeline lives in its own worker slot, so this does not evict the ASR Engine.
+ *
+ * Cancel is the usual terminate, which also drops the ASR Engine — acceptable, since translation
+ * only ever runs after its transcription has finished.
+ */
+export async function translateTexts(
+  pair: TranslationPair,
+  texts: string[],
+  opts: TranslateOpts = {},
+): Promise<string[]> {
+  const done = await call((id) => ({ id, type: 'translate', pair, texts }), {
+    signal: opts.signal,
+    cancelMessage: 'Translation stopped',
+    onEvent: (ev) => {
+      if (ev.type === 'progress') opts.onProgress?.(ev.status)
+      else if (ev.type === 'loadProgress') opts.onLoadProgress?.(ev.status)
+    },
+  })
+  return done.translations ?? []
 }
 
 /** Quick ×realtime benchmark; loads (or reuses) the engine in the worker. */

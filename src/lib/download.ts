@@ -41,6 +41,11 @@ type Dtype = keyof typeof DTYPE_SUFFIX
 const VAD_HF_ID = 'onnx-community/silero-vad'
 const VAD_FILES = ['onnx/model.onnx']
 
+// ponytail: the Marian MT models (ADR-0018) are NOT prefetched here. At ~113 MB they are a fifth of
+// the smallest ASR model, they are only wanted by the subset of users who turn Translate on, and
+// Transformers.js fetches them fine on its own. `evictModel` still reaches them (same URL shape) if
+// one is ever added to the Catalog.
+
 const CONFIG_FILES = [
   'config.json',
   'generation_config.json',

@@ -99,9 +99,13 @@ The separate mobile-only spoken conversation app where a person speaks or types 
 _Avoid_: Translate Section inside the web app.
 
 **Translation**:
-The text result of Native Translate turning a source phrase into a target-language phrase.
-_Not_: Whisper's `translate` task (`AsrLayer.task`), which only goes *foreign speech → English text* inside Transcription.
+The text result of turning a source phrase into a target-language phrase. In **Native Translate** it is one Spoken Turn's output. In **Web Transcribe**, "Translate to English" is segment-level machine translation of a finished Transcript into the **Edit Layer**: the ASR Layer keeps the source language (raw export is Mandarin), the Edit Layer holds the English (corrected export is English subtitles). Word times inside a translated Segment are interpolated, never exact ([ADR-0018](./docs/adr/0018-two-stage-translation.md)).
+_Not_: Whisper's `translate` task. The app never runs it — `AsrLayer.task` is always `transcribe`.
 _Avoid_: interpret, localize.
+
+**Translation Pair**:
+A source→English direction Web Transcribe can machine-translate, named for the Marian model behind it: `zh-en` (also used for Cantonese, as a stated best effort) and `ja-en`. It is chosen by the Transcript's **language**, not by the Transcription Model. Tagalog has no Pair, and the Transcribe screen says so rather than offering a switch that would do nothing.
+_Avoid_: language pair (that's Native Translate's bidirectional **Travel Language Pair**), direction, translation model (the Pair names the direction; the Model is what implements it).
 
 **Translation Provider**:
 The selected engine for the Translation task in Native Translate. It can be a local Translation Model or a frontier cloud model, while ASR and voice output stay local.

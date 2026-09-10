@@ -78,6 +78,18 @@ const TranscriptRecord = z.object({
   edit: EditLayer,
   /** Speakers referenced by `EditSegment.speakerId`. Absent on records made before ADR-0017. */
   speakers: z.record(z.string(), z.object({ name: z.string() })).optional(),
+  /**
+   * Set when the Edit Layer holds a machine translation of the ASR Layer (ADR-0018): raw export is
+   * the source language, corrected export is English. `pair` mirrors `TranslationPair`.
+   */
+  translation: z
+    .object({
+      to: z.literal('en'),
+      from: z.string(),
+      pair: z.enum(['zh-en', 'ja-en']),
+      model: z.string(),
+    })
+    .optional(),
 })
 export type TranscriptRecord = z.infer<typeof TranscriptRecord>
 export type Speakers = NonNullable<TranscriptRecord['speakers']>

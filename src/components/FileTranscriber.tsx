@@ -41,9 +41,11 @@ export function FileTranscriber() {
         ? 'Decoding audio'
         : fileJob.phase === 'loading'
           ? 'Loading model'
-          : fileJob.phase === 'cancelling'
-            ? 'Stopping'
-            : 'Transcribing'
+          : fileJob.phase === 'translating'
+            ? 'Translating'
+            : fileJob.phase === 'cancelling'
+              ? 'Stopping'
+              : 'Transcribing'
     return (
       <div className="space-y-8">
         <div className="space-y-3">

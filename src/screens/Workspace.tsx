@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useApp } from '@/lib/store'
-import { canTranslate } from '@/lib/catalog'
+import { translationPairFor } from '@/lib/translation'
 import { PRIMARY_LANGUAGES, type PrimaryLanguage } from '@/lib/types'
 import { FileTranscriber } from '@/components/FileTranscriber'
 import { LiveMic } from '@/components/LiveMic'
@@ -94,13 +94,20 @@ export function Workspace() {
           </div>
         )}
 
-        {canTranslate(activeModel) && (
+        {/* Gated on the LANGUAGE, not the model: translation is a second Marian stage over the
+            finished transcript now, so the Transcription Model has no say in it (ADR-0018). */}
+        {!activeModel.englishOnly && translationPairFor(language) && (
           <div className="flex items-center gap-2">
             <Switch id="translate" checked={translate} onCheckedChange={setTranslate} />
             <Label htmlFor="translate" className="lt-eyebrow">
               Translate to English
             </Label>
           </div>
+        )}
+        {language === 'tl' && (
+          <p className="text-xs text-muted-foreground">
+            Tagalog translation is not available yet.
+          </p>
         )}
       </div>
 

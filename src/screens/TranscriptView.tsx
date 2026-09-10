@@ -32,6 +32,7 @@ import {
   type FlatWord,
 } from '@/lib/playback'
 import { useApp } from '@/lib/store'
+import { sourceLanguageLabel, translationPairFor } from '@/lib/translation'
 import {
   alternateByTurn,
   assignSpeakerForward,
@@ -43,6 +44,7 @@ import { cn, formatTime, uid } from '@/lib/utils'
 import {
   Combine,
   Download,
+  Languages,
   Mic,
   Paperclip,
   Pause,
@@ -341,6 +343,7 @@ export function TranscriptView() {
   const activeModel = useApp((s) => s.activeModel)
   const job = useApp((s) => s.job)
   const runRerunJob = useApp((s) => s.runRerunJob)
+  const translateRecord = useApp((s) => s.translateRecord)
   const continueFromRecord = useApp((s) => s.continueFromRecord)
   const stopActiveJob = useApp((s) => s.stopActiveJob)
   const commitEdit = useApp((s) => s.commitEdit)
@@ -628,16 +631,20 @@ export function TranscriptView() {
     downloadBlob(filename, asset.blob)
   }
 
-  // The rerun job (if any) lives in the store now, so it survives leaving this view.
-  const rerunJob = job && job.kind === 'rerun' ? job : null
-  const rerunLabel =
-    rerunJob?.phase === 'decoding'
+  // The rerun/translate job (if any) lives in the store now, so it survives leaving this view.
+  const bgJob = job && (job.kind === 'rerun' || job.kind === 'translate') ? job : null
+  const bgLabel =
+    bgJob?.phase === 'decoding'
       ? 'Decoding source media'
-      : rerunJob?.phase === 'loading'
-        ? 'Loading model'
-        : rerunJob?.phase === 'cancelling'
-          ? 'Stopping rerun'
-          : 'Rerunning transcript'
+      : bgJob?.phase === 'loading'
+        ? bgJob.kind === 'translate'
+          ? 'Loading the translation model (113 MB, once)'
+          : 'Loading model'
+        : bgJob?.phase === 'translating'
+          ? 'Translating to English'
+          : bgJob?.phase === 'cancelling'
+            ? 'Stopping'
+            : 'Rerunning transcript'
 
   const editable = layer === 'corrected'
   const hasSpeakers = Object.keys(record.speakers ?? {}).length > 0
@@ -650,7 +657,9 @@ export function TranscriptView() {
         subtitle={
           <span className="lt-eyebrow">
             {record.model} · {record.asr.language} ·{' '}
-            {record.asr.task === 'translate' && <>Translated to English · </>}
+            {record.translation && (
+              <>Translated to English from {sourceLanguageLabel(record.translation.from)} · </>
+            )}
             {formatTime(record.source.durationSec)}
           </span>
         }
@@ -729,7 +738,14 @@ export function TranscriptView() {
         </div>
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <div className="flex items-center gap-2">
+          <div
+            className="flex items-center gap-2"
+            title={
+              record.translation
+                ? `Raw: ${sourceLanguageLabel(record.translation.from)}. Corrected: English`
+                : undefined
+            }
+          >
             <Switch
               id="layer"
               checked={editable}
@@ -753,6 +769,21 @@ export function TranscriptView() {
           )}
 
           <div className="ml-auto flex flex-wrap items-center gap-1">
+            {translationPairFor(record.asr.language) && !record.translation && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!!job}
+                onClick={() => void translateRecord()}
+                title={
+                  job
+                    ? 'A job is already running'
+                    : 'Machine-translate every segment into English (the corrected layer)'
+                }
+              >
+                <Languages className="size-3.5" /> Translate to English
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -838,26 +869,26 @@ export function TranscriptView() {
         </div>
       </div>
 
-      {rerunJob && (
+      {bgJob && (
         <div className="space-y-3">
           <div className="flex items-baseline justify-between gap-3">
-            <span className="lt-eyebrow">{rerunLabel}</span>
-            {rerunJob.phase !== 'cancelling' && (
-              <span className="lt-num text-sm">{rerunJob.pct}%</span>
+            <span className="lt-eyebrow">{bgLabel}</span>
+            {bgJob.phase !== 'cancelling' && (
+              <span className="lt-num text-sm">{bgJob.pct}%</span>
             )}
           </div>
-          {rerunJob.phase === 'cancelling' ? (
+          {bgJob.phase === 'cancelling' ? (
             <div className="h-1 w-full overflow-hidden rounded-full bg-secondary">
               <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
             </div>
           ) : (
-            <Progress value={rerunJob.pct} />
+            <Progress value={bgJob.pct} />
           )}
           <Button
             variant="outline"
             size="sm"
             onClick={stopActiveJob}
-            disabled={rerunJob.phase === 'cancelling'}
+            disabled={bgJob.phase === 'cancelling'}
             className="w-fit"
           >
             <Square className="size-3 fill-current" /> Stop

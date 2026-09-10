@@ -11,7 +11,8 @@ import type {
   TranscriptRecord,
 } from './types'
 import { detectCapability, estimateEta, fitCheck } from './capability'
-import { RETIRED, asrTask, buildCatalog, recommendModel } from './catalog'
+import { RETIRED, buildCatalog, recommendModel } from './catalog'
+import { joinSegmentText, translationPairFor } from './translation'
 import {
   deleteRecordingChunks,
   deleteTranscript,
@@ -37,10 +38,11 @@ import {
   isCancelled,
   languageName,
   transcribeWithEngine,
+  translateTexts,
   type LoadStatus,
 } from './engine'
 import { downloadModel } from './download'
-import { buildAsrLayer, deriveEditLayer } from './asr'
+import { buildAsrLayer, deriveEditLayer, deriveTranslatedEditLayer } from './asr'
 import { decodeToPcm16 } from './ffmpeg'
 import { uid } from './utils'
 import { evictModel, evictStaleFiles, markProvisioned as persistProvisioned, reconcileProvisioned } from './models'
@@ -48,13 +50,21 @@ import { evictModel, evictStaleFiles, markProvisioned as persistProvisioned, rec
 /** Max undo steps kept per open transcript (Edit-layer time machine). */
 const HISTORY_LIMIT = 100
 
-/** One step of the time machine: the Edit layer plus the Speakers it referenced (ADR-0017). */
+/**
+ * One step of the time machine: the Edit layer plus the Speakers it referenced (ADR-0017) and the
+ * translation note (ADR-0018), so undoing a Translate restores the untranslated transcript whole.
+ */
 export interface EditSnapshot {
   edit: EditLayer
   speakers?: Speakers
+  translation?: TranscriptRecord['translation']
 }
 
-const snapshot = (r: TranscriptRecord): EditSnapshot => ({ edit: r.edit, speakers: r.speakers })
+const snapshot = (r: TranscriptRecord): EditSnapshot => ({
+  edit: r.edit,
+  speakers: r.speakers,
+  translation: r.translation,
+})
 
 export type View = 'landing' | 'onboarding' | 'workspace' | 'transcript' | 'history'
 
@@ -77,8 +87,8 @@ function writeViewHash(view: View): void {
   if (window.location.hash !== next) window.location.hash = next
 }
 
-export type JobKind = 'file' | 'rerun'
-export type JobPhase = 'decoding' | 'loading' | 'transcribing' | 'cancelling'
+export type JobKind = 'file' | 'rerun' | 'translate'
+export type JobPhase = 'decoding' | 'loading' | 'transcribing' | 'translating' | 'cancelling'
 
 /** A single in-flight transcription, owned by the store so it survives view changes. */
 export interface ActiveJob {
@@ -131,6 +141,40 @@ let lastFile: File | null = null
 // Same reasoning for the Download: it outlives the Models screen that started it.
 let modelAbort: AbortController | null = null
 let lastModel: { model: CatalogModel; makeActive: boolean } | null = null
+
+/* ── Stage two: machine translation (ADR-0018) ────────────────────────────── */
+
+/**
+ * Build the Edit layer for an ASR layer the user asked to have translated: each Segment goes
+ * through Marian and the English comes back as the Edit layer, so the raw export stays the source
+ * language and the corrected export is English subtitles.
+ *
+ * Falls back to the plain 1:1 derivation when the language has no Marian pair (English, Tagalog,
+ * 'auto'), which is also what makes the call site a one-liner.
+ */
+async function translateRecordSegments(
+  asr: AsrLayer,
+  language: string,
+  opts: { signal?: AbortSignal; patch?: (p: Partial<ActiveJob>) => void } = {},
+): Promise<Pick<TranscriptRecord, 'edit' | 'translation'>> {
+  const pair = translationPairFor(language)
+  if (!pair || asr.segments.length === 0) return { edit: deriveEditLayer(asr) }
+  const { patch } = opts
+  patch?.({ phase: 'translating', pct: 0, partial: '', etaSec: null })
+  const translations = await translateTexts(
+    pair,
+    asr.segments.map((s) => joinSegmentText(s.words.map((w) => w.text))),
+    {
+      signal: opts.signal,
+      onLoadProgress: (s) => patch?.({ phase: 'loading', pct: Math.round(s.ratio * 100) }),
+      onProgress: (s) => patch?.({ phase: 'translating', pct: Math.round(s.ratio * 100) }),
+    },
+  )
+  return {
+    edit: deriveTranslatedEditLayer(asr, translations),
+    translation: { to: 'en', from: language, pair, model: `opus-mt-${pair}` },
+  }
+}
 
 /* ── Live Session ─────────────────────────────────────────────────────────── */
 
@@ -226,8 +270,7 @@ function peakOf(pcm: Int16Array): number {
  * behind the speaker but the per-tick cost stays bounded.
  */
 async function tickBody(final: boolean): Promise<void> {
-  const { activeModel, primaryLanguage, sessionLanguage, translate, capability, live } =
-    useApp.getState()
+  const { activeModel, primaryLanguage, sessionLanguage, capability, live } = useApp.getState()
   if (!live || !activeModel) return
   const from = committedSamples
   const to = totalSamples
@@ -239,16 +282,14 @@ async function tickBody(final: boolean): Promise<void> {
     setLive({ interimText: '' })
     return
   }
-  // Whisper convention: `language` stays the SOURCE language even when translating to English.
+  // Always the SOURCE language: translation is a second stage over the finished ASR (ADR-0018).
   const language = languageName(
     sessionLanguage ?? primaryLanguage,
     activeModel.englishOnly,
     activeModel.forceLanguage,
   )
-  const task = asrTask(activeModel, translate)
   const out = await transcribeWithEngine(activeModel, capability?.device ?? 'wasm', tail, {
     language,
-    task,
     englishOnly: activeModel.englishOnly,
   })
   const text = (out.text ?? '').replace(/\s+/g, ' ').trim()
@@ -256,7 +297,7 @@ async function tickBody(final: boolean): Promise<void> {
     setLive({ interimText: text })
     return
   }
-  liveSegments.push(...buildAsrLayer(out, language ?? 'auto', from / SR, task).segments)
+  liveSegments.push(...buildAsrLayer(out, language ?? 'auto', from / SR).segments)
   committedSamples = to
   setLive((l) => ({
     committedText: [l.committedText, text].filter(Boolean).join(' '),
@@ -368,7 +409,7 @@ interface AppState {
   primaryLanguage: PrimaryLanguage
   /** Session Language: the Transcribe screen's override, null = follow `primaryLanguage`. */
   sessionLanguage: PrimaryLanguage | null
-  /** Run the Whisper `translate` task (foreign speech → English text) instead of `transcribe`. */
+  /** Machine-translate each Segment into English after transcribing (ADR-0018). */
   translate: boolean
   /** The provisioned, active Transcription Model (downloaded + selected). */
   activeModel: CatalogModel | null
@@ -406,9 +447,14 @@ interface AppState {
   setMediaUrl: (url: string | null) => void
   /**
    * Apply an edit to the open transcript: push the prior snapshot onto undo, clear redo, autosave.
-   * `speakers` omitted leaves the map alone; an empty map clears it.
+   * `speakers` omitted leaves the map alone; an empty map clears it. `translation` likewise only
+   * sets the note when given, so an ordinary word edit never disturbs it.
    */
-  commitEdit: (edit: EditLayer, speakers?: Speakers) => void
+  commitEdit: (
+    edit: EditLayer,
+    speakers?: Speakers,
+    translation?: TranscriptRecord['translation'],
+  ) => void
   undo: () => void
   redo: () => void
   refreshHistory: () => Promise<void>
@@ -417,6 +463,8 @@ interface AppState {
   runFileJob: (file: File) => Promise<void>
   /** Re-transcribe the open record with the Active Model as a nav-safe background job. */
   runRerunJob: () => Promise<void>
+  /** Machine-translate the open record into English, replacing its Edit layer (undoable). */
+  translateRecord: () => Promise<void>
   /** Download a model as a nav-safe background job (fetch → load → provision → benchmark). */
   startModelDownload: (m: CatalogModel, opts?: { makeActive?: boolean }) => Promise<void>
   /** Abort the in-flight Download; the bytes already fetched are kept for a resume. */
@@ -590,7 +638,7 @@ export const useApp = create<AppState>((set, get) => ({
     if (prev && prev !== mediaUrl) URL.revokeObjectURL(prev)
     set({ mediaUrl })
   },
-  commitEdit: (edit, speakers) => {
+  commitEdit: (edit, speakers, translation) => {
     const { record } = get()
     if (!record) return
     const next =
@@ -599,7 +647,13 @@ export const useApp = create<AppState>((set, get) => ({
         : Object.keys(speakers).length > 0
           ? speakers
           : undefined
-    const updated = { ...record, edit, speakers: next, updatedAt: Date.now() }
+    const updated = {
+      ...record,
+      edit,
+      speakers: next,
+      translation: translation ?? record.translation,
+      updatedAt: Date.now(),
+    }
     set((s) => ({
       record: updated,
       past: [...s.past, snapshot(record)].slice(-HISTORY_LIMIT),
@@ -660,13 +714,11 @@ export const useApp = create<AppState>((set, get) => ({
         ac.signal,
       )
       patch({ phase: 'loading', pct: 0, etaSec: estimateEta(durationSec, capability?.benchmarkRtf ?? null) })
-      // Whisper convention: `language` stays the SOURCE language even when translating to English.
+      // Always the SOURCE language: translation is a second stage over the finished ASR (ADR-0018).
       const language = languageName(sessionLanguage ?? primaryLanguage, activeModel.englishOnly, activeModel.forceLanguage)
-      const task = asrTask(activeModel, translate)
       const out = await transcribeWithEngine(activeModel, device, pcm, {
         signal: ac.signal,
         language,
-        task,
         englishOnly: activeModel.englishOnly,
         onLoadProgress: (s) => patch({ pct: Math.round(s.ratio * 100) }),
         onDeviceReady: (d) => patch({ device: d, phase: 'transcribing', pct: 0 }),
@@ -674,7 +726,10 @@ export const useApp = create<AppState>((set, get) => ({
         onProgress: (s) => patch({ pct: Math.round(s.ratio * 100) }),
         onPartial: (t) => patch({ partial: t }),
       })
-      const asrLayer = buildAsrLayer(out, language ?? 'auto', 0, task)
+      const asrLayer = buildAsrLayer(out, language ?? 'auto', 0)
+      const derived = translate
+        ? await translateRecordSegments(asrLayer, language ?? 'auto', { signal: ac.signal, patch })
+        : { edit: deriveEditLayer(asrLayer) }
       const now = Date.now()
       const mediaId = uid('media_')
       const record: TranscriptRecord = {
@@ -692,7 +747,7 @@ export const useApp = create<AppState>((set, get) => ({
         createdAt: now,
         updatedAt: now,
         asr: asrLayer,
-        edit: deriveEditLayer(asrLayer),
+        ...derived,
       }
       await saveMediaAsset({
         id: mediaId,
@@ -768,13 +823,11 @@ export const useApp = create<AppState>((set, get) => ({
         ac.signal,
       )
       patch({ phase: 'loading', pct: 0, etaSec: estimateEta(durationSec, capability?.benchmarkRtf ?? null) })
-      // Whisper convention: `language` stays the SOURCE language even when translating to English.
+      // Always the SOURCE language: translation is a second stage over the finished ASR (ADR-0018).
       const language = languageName(sessionLanguage ?? primaryLanguage, activeModel.englishOnly, activeModel.forceLanguage)
-      const task = asrTask(activeModel, translate)
       const out = await transcribeWithEngine(activeModel, device, pcm, {
         signal: ac.signal,
         language,
-        task,
         englishOnly: activeModel.englishOnly,
         onLoadProgress: (s) => patch({ pct: Math.round(s.ratio * 100) }),
         onDeviceReady: (d) => patch({ device: d, phase: 'transcribing', pct: 0 }),
@@ -782,7 +835,10 @@ export const useApp = create<AppState>((set, get) => ({
         onProgress: (s) => patch({ pct: Math.round(s.ratio * 100) }),
         onPartial: (t) => patch({ partial: t }),
       })
-      const asrLayer = buildAsrLayer(out, language ?? 'auto', 0, task)
+      const asrLayer = buildAsrLayer(out, language ?? 'auto', 0)
+      const derived = translate
+        ? await translateRecordSegments(asrLayer, language ?? 'auto', { signal: ac.signal, patch })
+        : { edit: deriveEditLayer(asrLayer) }
       const now = Date.now()
       const next: TranscriptRecord = {
         id: uid('tr_'),
@@ -797,7 +853,7 @@ export const useApp = create<AppState>((set, get) => ({
         createdAt: now,
         updatedAt: now,
         asr: asrLayer,
-        edit: deriveEditLayer(asrLayer),
+        ...derived,
       }
       await saveTranscript(next)
       jobAbort = null
@@ -826,6 +882,59 @@ export const useApp = create<AppState>((set, get) => ({
           },
         })
       }
+    }
+  },
+
+  translateRecord: async () => {
+    const { record, job, sessionLanguage, primaryLanguage } = get()
+    if (!record || job) return // same single-job invariant as the transcription jobs
+    // A record transcribed with language auto-detect has no source language of its own, so the
+    // Transcribe screen's current pick stands in for it.
+    const language =
+      record.asr.language !== 'auto' ? record.asr.language : sessionLanguage ?? primaryLanguage
+    if (!translationPairFor(language)) return
+    jobAbort?.abort()
+    const ac = new AbortController()
+    jobAbort = ac
+    const patch = (p: Partial<ActiveJob>) => set((s) => (s.job ? { job: { ...s.job, ...p } } : {}))
+    set({
+      jobNotice: null,
+      job: {
+        kind: 'translate',
+        phase: 'loading',
+        pct: 0,
+        label: record.source.filename,
+        device: 'wasm', // Marian is int8 on CPU; the ASR device is irrelevant here
+        partial: '',
+        etaSec: null,
+      },
+    })
+    try {
+      const derived = await translateRecordSegments(record.asr, language, {
+        signal: ac.signal,
+        patch,
+      })
+      jobAbort = null
+      set({ job: null })
+      // Never clobber a different transcript the user opened while this ran.
+      if (get().record?.id !== record.id) {
+        set({ jobNotice: { kind: 'done', label: record.source.filename, recordId: record.id } })
+        return
+      }
+      // Through the time machine, so Undo puts the source-language Edit layer back.
+      get().commitEdit(derived.edit, undefined, derived.translation)
+    } catch (e) {
+      jobAbort = null
+      set({
+        job: null,
+        jobNotice: isCancelled(e)
+          ? null
+          : {
+              kind: 'error',
+              label: record.source.filename,
+              message: e instanceof Error ? e.message : String(e),
+            },
+      })
     }
   },
 
@@ -1045,7 +1154,7 @@ export const useApp = create<AppState>((set, get) => ({
     const asr: AsrLayer = {
       segments: liveSegments.slice(),
       language: existing?.asr.language ?? languageName(sessionLanguage ?? primaryLanguage, activeModel?.englishOnly ?? false, activeModel?.forceLanguage) ?? 'auto',
-      task: existing?.asr.task ?? (activeModel ? asrTask(activeModel, translate) : 'transcribe'),
+      task: 'transcribe',
     }
     const durationSec = totalSamples / SR
     const source = {
@@ -1056,11 +1165,25 @@ export const useApp = create<AppState>((set, get) => ({
       mediaId: id,
       mimeType: 'audio/wav',
     }
+    // Only the ASR segments added by this leg get derived into the Edit layer, everything before
+    // them is the user's corrected text and must survive untouched. Continuing an already-translated
+    // recording keeps translating, so the leg doesn't come back in the wrong language.
+    const added = existing ? { ...asr, segments: asr.segments.slice(existing.asr.segments.length) } : asr
+    const wantsTranslation = existing ? !!existing.translation : translate
+    // No job indicator here (the Live tab is already showing "transcribing"), and no cancel: a
+    // failed MT must never eat the recording, so it degrades to the untranslated derivation.
+    let derived: Pick<TranscriptRecord, 'edit' | 'translation'>
+    try {
+      derived = wantsTranslation
+        ? await translateRecordSegments(added, existing?.translation?.from ?? asr.language)
+        : { edit: deriveEditLayer(added) }
+    } catch (e) {
+      error ??= e instanceof Error ? e.message : String(e)
+      derived = { edit: deriveEditLayer(added) }
+    }
+
     let updated: TranscriptRecord
     if (existing) {
-      // Only the ASR segments added by this leg get derived into the Edit layer, everything
-      // before them is the user's corrected text and must survive untouched.
-      const added = asr.segments.slice(existing.asr.segments.length)
       updated = {
         ...existing,
         source: { ...existing.source, ...source },
@@ -1068,11 +1191,9 @@ export const useApp = create<AppState>((set, get) => ({
         asr,
         edit: {
           ...existing.edit,
-          segments: [
-            ...existing.edit.segments,
-            ...deriveEditLayer({ ...asr, segments: added }).segments,
-          ],
+          segments: [...existing.edit.segments, ...derived.edit.segments],
         },
+        translation: existing.translation ?? derived.translation,
       }
     } else {
       updated = {
@@ -1083,7 +1204,7 @@ export const useApp = create<AppState>((set, get) => ({
         createdAt: now,
         updatedAt: now,
         asr,
-        edit: deriveEditLayer(asr),
+        ...derived,
       }
     }
     await saveTranscript(updated)

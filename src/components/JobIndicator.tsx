@@ -8,6 +8,7 @@ const PHASE_TEXT: Record<JobPhase, string> = {
   decoding: 'Decoding',
   loading: 'Loading model',
   transcribing: 'Transcribing',
+  translating: 'Translating…',
   cancelling: 'Stopping',
 }
 
