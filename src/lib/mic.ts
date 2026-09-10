@@ -97,3 +97,19 @@ export async function startCapture(onFrame: (pcm: Int16Array) => void): Promise<
     },
   }
 }
+
+let warmed = false
+/**
+ * Ask for the microphone once when the Transcribe page mounts, so the permission prompt is
+ * answered in the main window before a PiP window (which cannot show it) tries to record.
+ */
+export async function warmMicPermission(): Promise<void> {
+  if (warmed || !navigator.mediaDevices?.getUserMedia) return
+  warmed = true
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    stream.getTracks().forEach((t) => t.stop())
+  } catch {
+    /* denied or unavailable: Record will surface the real error */
+  }
+}

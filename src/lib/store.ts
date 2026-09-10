@@ -137,6 +137,7 @@ let pcmChunks: Int16Array[] = []
 let totalSamples = 0
 let committedSamples = 0
 let liveSegments: AsrSegment[] = []
+let liveStarting = false // mic prompt in flight; ignore a second Record
 let capture: Capture | null = null
 let tickBusy = false
 let tickPromise: Promise<void> = Promise.resolve()
@@ -797,15 +798,33 @@ export const useApp = create<AppState>((set, get) => ({
 
   startLive: async () => {
     const s = get()
-    if (!s.activeModel || s.job) return
+    if (!s.activeModel || s.job || liveStarting) return
     if (s.live && s.live.status !== 'paused') return
+    // Ask for the mic BEFORE showing a session: until the stream is granted nothing is recording,
+    // and the permission prompt lives in the main window (invisible from the PiP).
+    liveStarting = true
+    let cap: Capture
+    try {
+      cap = await startCapture(onFrame)
+    } catch (e) {
+      liveStarting = false
+      set({
+        jobNotice: {
+          kind: 'error',
+          label: 'Microphone',
+          message: e instanceof Error ? e.message : String(e),
+        },
+      })
+      return
+    }
     resetLiveModule()
-    const id = uid('media_')
+    capture = cap
+    liveStarting = false
     set({
       jobNotice: null,
       workspaceTab: 'live',
       live: {
-        id,
+        id: uid('media_'),
         status: 'recording',
         seconds: 0,
         committedText: '',
@@ -814,20 +833,6 @@ export const useApp = create<AppState>((set, get) => ({
         error: null,
       },
     })
-    try {
-      capture = await startCapture(onFrame)
-    } catch (e) {
-      // Nothing was recorded, so there is no session to show, surface it as a notice instead.
-      capture = null
-      set({
-        live: null,
-        jobNotice: {
-          kind: 'error',
-          label: 'Microphone',
-          message: e instanceof Error ? e.message : String(e),
-        },
-      })
-    }
   },
 
   stopLive: async () => {
@@ -935,13 +940,16 @@ export const useApp = create<AppState>((set, get) => ({
 
   continueLive: async () => {
     const live = get().live
-    if (!live || live.status !== 'paused') return
-    setLive({ status: 'recording', error: null })
+    if (!live || live.status !== 'paused' || liveStarting) return
+    liveStarting = true
     try {
       capture = await startCapture(onFrame)
+      setLive({ status: 'recording', error: null })
     } catch (e) {
       capture = null
       setLive({ status: 'paused', error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      liveStarting = false
     }
   },
 

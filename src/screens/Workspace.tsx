@@ -1,3 +1,5 @@
+import { useEffect } from 'react'
+import { warmMicPermission } from '@/lib/mic'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useApp } from '@/lib/store'
 import { FileTranscriber } from '@/components/FileTranscriber'
@@ -10,6 +12,9 @@ export function Workspace() {
   const setView = useApp((s) => s.setView)
   const workspaceTab = useApp((s) => s.workspaceTab)
   const setWorkspaceTab = useApp((s) => s.setWorkspaceTab)
+  useEffect(() => {
+    if (activeModel) void warmMicPermission()
+  }, [activeModel])
 
   if (!activeModel) {
     return <NoModelState onSetup={() => setView('onboarding')} />
