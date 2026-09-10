@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom'
-import { Loader2, Square, X, CircleCheck, TriangleAlert } from 'lucide-react'
+import { Loader2, Square, X } from 'lucide-react'
 import { useApp } from '@/lib/store'
 import type { JobPhase } from '@/lib/store'
 import { Button } from '@/components/ui/button'
@@ -28,21 +28,24 @@ export function JobIndicator() {
     <>
       {job && (
         <div
-          className="flex items-center gap-2 rounded-full border bg-background/70 px-2.5 py-1 text-xs"
-          title={`${job.label} — ${PHASE_TEXT[job.phase]}`}
+          className="mr-1 flex h-8 items-center gap-2 rounded-full border pl-2.5 pr-1 text-xs"
+          title={`${job.label}: ${PHASE_TEXT[job.phase]}`}
         >
-          <Loader2 className="size-3.5 animate-spin text-primary" />
-          <span className="hidden text-muted-foreground sm:inline">{PHASE_TEXT[job.phase]}</span>
+          <Loader2 className="size-3 shrink-0 animate-spin text-primary" />
+          <span className="hidden text-muted-foreground md:inline">
+            {PHASE_TEXT[job.phase]}
+          </span>
           {job.phase !== 'cancelling' && (
-            <span className="tabular-nums font-medium">{job.pct}%</span>
+            <span className="lt-num text-[11px]">{job.pct}%</span>
           )}
           <button
             onClick={stopActiveJob}
             disabled={job.phase === 'cancelling'}
             title="Stop transcription"
-            className="grid size-5 place-items-center rounded-full text-muted-foreground hover:text-destructive disabled:opacity-50"
+            aria-label="Stop transcription"
+            className="grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-destructive-soft focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-45"
           >
-            <Square className="size-3 fill-current" />
+            <Square className="size-2.5 fill-current" />
           </button>
         </div>
       )}
@@ -51,45 +54,43 @@ export function JobIndicator() {
         // Portal to <body>: the TopBar's backdrop-filter would otherwise act as the containing
         // block for this fixed element and pin it to the header instead of the viewport.
         createPortal(
-          <div className="fixed bottom-4 right-4 z-50 flex max-w-sm items-start gap-3 rounded-xl border bg-background/95 p-3 shadow-lg backdrop-blur">
-          {notice.kind === 'done' ? (
-            <CircleCheck className="mt-0.5 size-5 shrink-0 text-primary" />
-          ) : (
-            <TriangleAlert className="mt-0.5 size-5 shrink-0 text-destructive" />
-          )}
-          <div className="min-w-0 flex-1 text-sm">
-            <p className="font-medium">
-              {notice.kind === 'done' ? 'Transcript ready' : 'Transcription failed'}
-            </p>
-            <p
-              className="truncate text-xs text-muted-foreground"
-              title={notice.kind === 'error' ? notice.message : notice.label}
-            >
-              {notice.kind === 'done' ? notice.label : notice.message}
-            </p>
-            <div className="mt-2 flex gap-2">
+          <div className="fixed inset-x-4 bottom-4 z-50 rounded-lg border bg-popover p-4 shadow-lg sm:left-auto sm:right-6 sm:w-80">
+            <div className="flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="lt-eyebrow">
+                  {notice.kind === 'done' ? 'Transcript ready' : 'Transcription failed'}
+                </p>
+                <p
+                  className="mt-2 truncate text-sm"
+                  title={notice.kind === 'error' ? notice.message : notice.label}
+                >
+                  {notice.kind === 'done' ? notice.label : notice.message}
+                </p>
+              </div>
+              <button
+                onClick={dismissJobNotice}
+                title="Dismiss"
+                aria-label="Dismiss"
+                className="-mr-1 -mt-1 grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="mt-3 flex gap-2">
               {notice.kind === 'done' && notice.recordId && (
-                <Button size="sm" variant="glow" onClick={() => void openTranscript(notice.recordId!)}>
-                  Open
+                <Button size="sm" onClick={() => void openTranscript(notice.recordId!)}>
+                  Open transcript
                 </Button>
               )}
               {notice.kind === 'error' && notice.retry && (
                 <Button size="sm" variant="outline" onClick={retryJob}>
-                  Retry
+                  Try again
                 </Button>
               )}
               <Button size="sm" variant="ghost" onClick={dismissJobNotice}>
                 Dismiss
               </Button>
             </div>
-          </div>
-          <button
-            onClick={dismissJobNotice}
-            title="Dismiss"
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <X className="size-4" />
-          </button>
           </div>,
           document.body,
         )}

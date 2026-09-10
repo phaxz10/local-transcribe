@@ -1,6 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowLeft,
   Play,
   Pause,
   Download,
@@ -13,9 +12,9 @@ import {
   Pencil,
   Undo2,
   Redo2,
-  Eye,
   RotateCcw,
   Square,
+  Mic,
   X,
 } from 'lucide-react'
 import { useApp } from '@/lib/store'
@@ -39,13 +38,12 @@ import {
 } from '@/lib/playback'
 import { cn, formatTime, uid } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import { ScreenHeader } from '@/components/ScreenHeader'
 
 const FORMATS: ExportFormat[] = ['txt', 'srt', 'vtt', 'json', 'md']
-
 
 interface Controller {
   seek: (t: number) => void
@@ -93,24 +91,27 @@ const Player = memo(function Player({
 
   return (
     <>
-      <Button variant="glow" size="icon" onClick={controller.toggle}>
+      <Button
+        size="icon"
+        onClick={controller.toggle}
+        title={playing ? 'Pause' : 'Play'}
+        aria-label={playing ? 'Pause' : 'Play'}
+        className="rounded-full"
+      >
         {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
       </Button>
-      <span className="font-mono text-xs tabular-nums text-muted-foreground">
-        {formatTime(currentTime)}
-      </span>
+      <span className="lt-num text-xs text-muted-foreground">{formatTime(currentTime)}</span>
       <input
         type="range"
         min={0}
         max={total || 0}
         step={0.1}
         value={currentTime}
+        aria-label="Seek"
         onChange={(e) => controller.seek(Number(e.target.value))}
-        className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-secondary accent-primary"
+        className="h-1 min-w-24 flex-1 cursor-pointer appearance-none rounded-full bg-secondary accent-primary outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       />
-      <span className="font-mono text-xs tabular-nums text-muted-foreground">
-        {formatTime(total)}
-      </span>
+      <span className="lt-num text-xs text-muted-foreground">{formatTime(total)}</span>
     </>
   )
 })
@@ -168,10 +169,11 @@ const SegmentRow = memo(function SegmentRow({
   const activeWordId = useActiveWord((s) => (s.segId === seg.id ? s.wordId : null))
   const segStart = seg.words[0]?.start ?? 0
   return (
-    <div className="group flex gap-3">
+    <div className="group flex gap-3 sm:gap-5">
       <button
         onClick={() => controller.seek(segStart)}
-        className="mt-1 h-fit shrink-0 font-mono text-xs text-muted-foreground opacity-60 transition-opacity hover:text-primary group-hover:opacity-100"
+        title="Jump to this point"
+        className="lt-num mt-[0.45rem] h-fit w-10 shrink-0 rounded text-right text-[11px] text-muted-foreground opacity-50 outline-none transition-opacity hover:text-primary hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
       >
         {formatTime(segStart)}
       </button>
@@ -202,7 +204,7 @@ const SegmentRow = memo(function SegmentRow({
                 activeWordId === w.id && 'word-active',
                 selectedWordId === w.id && 'ring-1 ring-primary',
                 low && 'word-low-confidence',
-                w.origin === null && 'italic text-accent',
+                w.origin === null && 'italic text-primary',
               )}
             >
               {w.text}{' '}
@@ -223,35 +225,30 @@ const RawBody = memo(function RawBody({
   controller: Controller
 }) {
   return (
-    <Card>
-      <CardContent className="space-y-4 p-6 text-[15px] leading-8">
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Eye className="size-3.5" /> Original transcript from the model — read-only. Switch to
-          Corrected to edit.
-        </p>
-        {segments.map((seg) => (
-          <div key={seg.id} className="flex gap-3">
-            <button
-              onClick={() => controller.seek(seg.start)}
-              className="mt-1 h-fit shrink-0 font-mono text-xs text-muted-foreground opacity-60 transition-opacity hover:text-primary"
-            >
-              {formatTime(seg.start)}
-            </button>
-            <p className="flex-1">
-              {seg.words.map((w) => (
-                <span
-                  key={w.id}
-                  onClick={() => controller.seek(w.start)}
-                  className="cursor-pointer rounded px-0.5 transition-colors hover:bg-secondary"
-                >
-                  {w.text}{' '}
-                </span>
-              ))}
-            </p>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
+    <div className="lt-measure lt-read space-y-4">
+      {segments.map((seg) => (
+        <div key={seg.id} className="group flex gap-3 sm:gap-5">
+          <button
+            onClick={() => controller.seek(seg.start)}
+            title="Jump to this point"
+            className="lt-num mt-[0.45rem] h-fit w-10 shrink-0 rounded text-right text-[11px] text-muted-foreground opacity-50 outline-none transition-opacity hover:text-primary hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+          >
+            {formatTime(seg.start)}
+          </button>
+          <p className="flex-1">
+            {seg.words.map((w) => (
+              <span
+                key={w.id}
+                onClick={() => controller.seek(w.start)}
+                className="cursor-pointer rounded px-0.5 transition-colors hover:bg-secondary"
+              >
+                {w.text}{' '}
+              </span>
+            ))}
+          </p>
+        </div>
+      ))}
+    </div>
   )
 })
 
@@ -264,6 +261,7 @@ export function TranscriptView() {
   const activeModel = useApp((s) => s.activeModel)
   const job = useApp((s) => s.job)
   const runRerunJob = useApp((s) => s.runRerunJob)
+  const continueFromRecord = useApp((s) => s.continueFromRecord)
   const stopActiveJob = useApp((s) => s.stopActiveJob)
   const commitEdit = useApp((s) => s.commitEdit)
   const undo = useApp((s) => s.undo)
@@ -372,7 +370,7 @@ export function TranscriptView() {
     redo()
   }, [redo])
 
-  // Cmd/Ctrl+Z undo, Shift+Cmd/Ctrl+Z (or Ctrl+Y) redo — only on the editable corrected layer,
+  // Cmd/Ctrl+Z undo, Shift+Cmd/Ctrl+Z (or Ctrl+Y) redo, only on the editable corrected layer,
   // and never while typing in a field so native text-undo keeps working there.
   useEffect(() => {
     if (layer !== 'corrected') return
@@ -463,11 +461,9 @@ export function TranscriptView() {
 
   if (!record) {
     return (
-      <div className="py-20 text-center text-muted-foreground">
-        No transcript open.
-        <div className="mt-4">
-          <Button onClick={() => setView('workspace')}>Back to workspace</Button>
-        </div>
+      <div className="space-y-5 py-20 text-center">
+        <p className="text-sm text-muted-foreground">No transcript open.</p>
+        <Button onClick={() => setView('workspace')}>Back to workspace</Button>
       </div>
     )
   }
@@ -488,85 +484,43 @@ export function TranscriptView() {
   const rerunJob = job && job.kind === 'rerun' ? job : null
   const rerunLabel =
     rerunJob?.phase === 'decoding'
-      ? 'Decoding source media...'
+      ? 'Decoding source media'
       : rerunJob?.phase === 'loading'
-        ? 'Loading model...'
+        ? 'Loading model'
         : rerunJob?.phase === 'cancelling'
-          ? 'Stopping rerun...'
-          : 'Rerunning transcript...'
+          ? 'Stopping rerun'
+          : 'Rerunning transcript'
+
+  const editable = layer === 'corrected'
 
   return (
-    <div className="space-y-5 py-4">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <button
-            onClick={() => setView('workspace')}
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="size-3.5" /> workspace
-          </button>
-          <h2 className="max-w-xl truncate text-xl font-semibold tracking-tight">
-            {record.source.filename}
-          </h2>
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span>{record.model}</span>
-            <span>{record.asr.language}</span>
-            <span>{formatTime(record.source.durationSec)}</span>
-          </div>
-        </div>
+    <div className="space-y-8">
+      <ScreenHeader
+        title={record.source.filename}
+        back={{ label: 'Transcribe', onClick: () => setView('workspace') }}
+        subtitle={
+          <span className="lt-eyebrow">
+            {record.model} · {record.asr.language} ·{' '}
+            {formatTime(record.source.durationSec)}
+          </span>
+        }
+      />
 
-        {/* Export controls */}
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2 text-xs">
-            <Label htmlFor="layer" className="text-muted-foreground">
-              {layer === 'corrected' ? 'Corrected · editable' : 'Original · read-only'}
-            </Label>
-            <Switch
-              id="layer"
-              checked={layer === 'corrected'}
-              onCheckedChange={(c) => setLayer(c ? 'corrected' : 'raw')}
-            />
-          </div>
-          <div className="flex flex-wrap items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!!job || !activeModel}
-              onClick={() => void runRerunJob()}
-              title={
-                job
-                  ? 'A transcription is already running'
-                  : activeModel
-                    ? `Create a new transcript with ${activeModel.label}`
-                    : 'Choose a model before rerunning'
-              }
-            >
-              <RotateCcw className="size-4" /> Rerun
-            </Button>
-            <Download className="mr-1 size-4 text-muted-foreground" />
-            {FORMATS.map((f) => (
-              <Button key={f} variant="outline" size="sm" onClick={() => doExport(f)}>
-                {f.toUpperCase()}
-              </Button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Player */}
-      <Card>
-        <CardContent className="flex items-center gap-3 p-3">
+      {/* One bar: playback, edit tools, layer, rerun, export. */}
+      <div className="sticky top-14 z-20 -mx-4 space-y-3 border-b bg-background/95 px-4 py-3 backdrop-blur md:-mx-6 md:px-6">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {mediaUrl ? (
             <>
               <audio ref={audioRef} src={mediaUrl} preload="metadata" className="hidden" />
               <Player controller={controller} fallbackDuration={record.source.durationSec} />
             </>
           ) : (
-            <div className="flex w-full items-center justify-between gap-2 text-sm text-muted-foreground">
-              <span>Attach the original file to enable playback and click to seek.</span>
+            <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 sm:w-auto sm:flex-1">
+              <span className="text-sm text-muted-foreground">
+                Attach the original file to play it back and click to seek.
+              </span>
               <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
-                <Paperclip className="size-4" /> Attach audio
+                <Paperclip className="size-3.5" /> Attach audio
               </Button>
               <input
                 ref={fileRef}
@@ -581,110 +535,164 @@ export function TranscriptView() {
               />
             </div>
           )}
-          {layer === 'corrected' && (
-            <>
+
+          {editable && (
+            <div className="ml-auto flex items-center gap-0.5">
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
                 disabled={!canUndo}
                 onClick={doUndo}
                 title="Undo (Cmd/Ctrl+Z)"
+                aria-label="Undo"
               >
                 <Undo2 className="size-4" />
               </Button>
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
                 disabled={!canRedo}
                 onClick={doRedo}
                 title="Redo (Shift+Cmd/Ctrl+Z)"
+                aria-label="Redo"
               >
                 <Redo2 className="size-4" />
               </Button>
               <Button
                 variant={showFind ? 'secondary' : 'ghost'}
-                size="icon"
+                size="icon-sm"
                 onClick={() => setShowFind((v) => !v)}
-                title="Find & replace"
+                title="Find and replace"
+                aria-label="Find and replace"
               >
                 <Search className="size-4" />
               </Button>
-            </>
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex items-center gap-2">
+            <Switch
+              id="layer"
+              checked={editable}
+              onCheckedChange={(c) => setLayer(c ? 'corrected' : 'raw')}
+            />
+            <Label htmlFor="layer" className="lt-eyebrow">
+              {editable ? 'Corrected · editable' : 'Original · read only'}
+            </Label>
+          </div>
+
+          <div className="ml-auto flex flex-wrap items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!!job || !activeModel}
+              onClick={() => void runRerunJob()}
+              title={
+                job
+                  ? 'A transcription is already running'
+                  : activeModel
+                    ? `Create a new transcript with ${activeModel.label}`
+                    : 'Choose a model before rerunning'
+              }
+            >
+              <RotateCcw className="size-3.5" /> Rerun
+            </Button>
+            {record.source.hash.startsWith('live:') && record.source.mediaId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!!job || !activeModel}
+                onClick={() => void continueFromRecord(record)}
+                title="Reopen the microphone and append to this recording"
+              >
+                <Mic className="size-3.5" /> Continue recording
+              </Button>
+            )}
+            <span className="mx-1 hidden h-4 w-px bg-border sm:block" />
+            <Download className="size-3.5 shrink-0 text-muted-foreground" />
+            {FORMATS.map((f) => (
+              <Button
+                key={f}
+                variant="ghost"
+                size="sm"
+                className="lt-num px-2 text-muted-foreground hover:text-foreground"
+                onClick={() => doExport(f)}
+                title={`Export as ${f.toUpperCase()}`}
+              >
+                {f.toUpperCase()}
+              </Button>
+            ))}
+          </div>
+        </div>
+      </div>
 
       {rerunJob && (
-        <Card>
-          <CardContent className="space-y-3 p-3">
-            <div className="flex items-center justify-between text-sm">
-              <span className="flex items-center gap-2">
-                <RotateCcw className="size-4 animate-spin text-primary" />
-                {rerunLabel}
-              </span>
-              {rerunJob.phase !== 'cancelling' && (
-                <span className="tabular-nums text-muted-foreground">{rerunJob.pct}%</span>
-              )}
-            </div>
-            {rerunJob.phase === 'cancelling' ? (
-              <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
-                <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
-              </div>
-            ) : (
-              <Progress value={rerunJob.pct} />
+        <div className="space-y-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="lt-eyebrow">{rerunLabel}</span>
+            {rerunJob.phase !== 'cancelling' && (
+              <span className="lt-num text-sm">{rerunJob.pct}%</span>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={stopActiveJob}
-              disabled={rerunJob.phase === 'cancelling'}
-              className="w-fit"
-            >
-              <Square className="size-3.5 fill-current" /> Stop
-            </Button>
-          </CardContent>
-        </Card>
+          </div>
+          {rerunJob.phase === 'cancelling' ? (
+            <div className="h-1 w-full overflow-hidden rounded-full bg-secondary">
+              <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
+            </div>
+          ) : (
+            <Progress value={rerunJob.pct} />
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={stopActiveJob}
+            disabled={rerunJob.phase === 'cancelling'}
+            className="w-fit"
+          >
+            <Square className="size-3 fill-current" /> Stop
+          </Button>
+        </div>
       )}
 
-      {/* Find & replace */}
       {showFind && (
-        <Card>
-          <CardContent className="flex flex-wrap items-center gap-2 p-3">
-            <input
-              value={findText}
-              onChange={(e) => {
-                setFindText(e.target.value)
-                setReplaceCount(null)
-              }}
-              placeholder="Find..."
-              className="h-9 flex-1 rounded-md border bg-transparent px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-            />
-            <input
-              value={replaceText}
-              onChange={(e) => setReplaceText(e.target.value)}
-              placeholder="Replace with..."
-              className="h-9 flex-1 rounded-md border bg-transparent px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-            />
-            <Button size="sm" onClick={runReplace} disabled={!findText}>
-              Replace all
-            </Button>
-            {replaceCount != null && (
-              <span className="text-xs text-muted-foreground">{replaceCount} replaced</span>
-            )}
-          </CardContent>
-        </Card>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={findText}
+            onChange={(e) => {
+              setFindText(e.target.value)
+              setReplaceCount(null)
+            }}
+            placeholder="Find"
+            aria-label="Find"
+            className="h-10 min-w-32 flex-1 rounded-md border bg-transparent px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          />
+          <input
+            value={replaceText}
+            onChange={(e) => setReplaceText(e.target.value)}
+            placeholder="Replace with"
+            aria-label="Replace with"
+            className="h-10 min-w-32 flex-1 rounded-md border bg-transparent px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          />
+          <Button onClick={runReplace} disabled={!findText}>
+            Replace all
+          </Button>
+          {replaceCount != null && (
+            <span className="lt-eyebrow">{replaceCount} replaced</span>
+          )}
+        </div>
       )}
 
       {/* Selected-word toolbar */}
       {selected && (
-        <div className="sticky top-16 z-10 flex flex-wrap items-center gap-1.5 rounded-lg border bg-card p-2 text-sm shadow-lg">
-          <span className="px-1 text-xs text-muted-foreground">Edit word:</span>
-          <Button size="sm" variant="outline" onClick={() => setEditingId(selected.wordId)}>
-            <Pencil /> Rename
+        <div className="sticky top-40 z-10 flex flex-wrap items-center gap-1 rounded-lg border bg-popover p-1.5 shadow-lg">
+          <span className="lt-eyebrow px-2">Word</span>
+          <Button size="sm" variant="ghost" onClick={() => setEditingId(selected.wordId)}>
+            <Pencil className="size-3.5" /> Rename
           </Button>
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             onClick={() => {
               const t = window.prompt('Insert word after:')
               if (t && t.trim())
@@ -695,22 +703,22 @@ export function TranscriptView() {
           </Button>
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             onClick={() => apply(splitSegment(record.edit, selected.segId, selected.wordId))}
           >
             <Scissors className="size-3.5" /> Split here
           </Button>
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             onClick={() => apply(mergeSegmentWithNext(record.edit, selected.segId))}
           >
             <Combine className="size-3.5" /> Merge next
           </Button>
           <Button
             size="sm"
-            variant="outline"
-            className="text-destructive"
+            variant="ghost"
+            className="text-destructive-soft hover:text-destructive-soft"
             onClick={() => {
               apply(deleteWord(record.edit, selected.segId, selected.wordId))
               setSelected(null)
@@ -718,40 +726,44 @@ export function TranscriptView() {
           >
             <Trash2 className="size-3.5" /> Delete
           </Button>
-          <Button size="icon" variant="ghost" onClick={() => setSelected(null)}>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => setSelected(null)}
+            title="Close"
+            aria-label="Close word tools"
+          >
             <X className="size-4" />
           </Button>
         </div>
       )}
 
       {/* Transcript body */}
-      {layer === 'corrected' ? (
-        <Card>
-          <CardContent className="space-y-4 p-6 text-[15px] leading-8">
-            {record.edit.segments.map((seg) => (
-              <SegmentRow
-                key={seg.id}
-                seg={seg}
-                selectedWordId={selected?.wordId ?? null}
-                editingId={editingId}
-                confidence={confidence}
-                controller={controller}
-                onSelectWord={onSelectWord}
-                onStartEdit={onStartEdit}
-                onCommitEdit={onCommitEdit}
-                onCancelEdit={onCancelEdit}
-              />
-            ))}
-          </CardContent>
-        </Card>
+      {editable ? (
+        <div className="lt-measure lt-read space-y-4">
+          {record.edit.segments.map((seg) => (
+            <SegmentRow
+              key={seg.id}
+              seg={seg}
+              selectedWordId={selected?.wordId ?? null}
+              editingId={editingId}
+              confidence={confidence}
+              controller={controller}
+              onSelectWord={onSelectWord}
+              onStartEdit={onStartEdit}
+              onCommitEdit={onCommitEdit}
+              onCancelEdit={onCancelEdit}
+            />
+          ))}
+        </div>
       ) : (
         <RawBody segments={record.asr.segments} controller={controller} />
       )}
 
-      <p className="text-center text-xs text-muted-foreground">
-        {layer === 'corrected'
-          ? 'Click a word to seek · double-click to edit · ⌘Z / ⇧⌘Z undo · autosaved locally'
-          : 'Viewing the original machine transcript · click a word to seek'}
+      <p className="lt-measure border-t pt-4 text-xs text-muted-foreground">
+        {editable
+          ? 'Click a word to seek · double-click to edit · ⌘Z / ⇧⌘Z to undo · autosaved locally'
+          : 'The original machine transcript · click a word to seek'}
       </p>
     </div>
   )

@@ -5,14 +5,19 @@ import type {
   EngineDevice,
 } from './types'
 
-async function detectWebGPU(): Promise<boolean> {
+async function detectWebGPU(): Promise<{ available: boolean; f16: boolean }> {
   try {
-    const gpu = (navigator as unknown as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu
-    if (!gpu) return false
+    const gpu = (
+      navigator as unknown as {
+        gpu?: { requestAdapter(): Promise<{ features: ReadonlySet<string> } | null> }
+      }
+    ).gpu
+    if (!gpu) return { available: false, f16: false }
     const adapter = await gpu.requestAdapter()
-    return Boolean(adapter)
+    if (!adapter) return { available: false, f16: false }
+    return { available: true, f16: Boolean(adapter.features?.has('shader-f16')) }
   } catch {
-    return false
+    return { available: false, f16: false }
   }
 }
 
@@ -56,7 +61,10 @@ export async function detectCapability(): Promise<CapabilityReport> {
   const deviceMemoryGb =
     (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? null
   const mobile = detectMobile()
-  const webgpu = await detectWebGPU()
+  const gpu = await detectWebGPU()
+  // The fp16 weights we ship for WebGPU need `shader-f16`; without it session creation fails after
+  // the download and we'd fetch the WASM variant too, so treat such an adapter as WASM up front.
+  const webgpu = gpu.available && gpu.f16
   const device: EngineDevice = webgpu ? 'webgpu' : 'wasm'
   const coi = Boolean(globalThis.crossOriginIsolated)
   const threads = typeof SharedArrayBuffer !== 'undefined' && coi
@@ -78,6 +86,7 @@ export async function detectCapability(): Promise<CapabilityReport> {
     mobile,
     crossOriginIsolated: coi,
     webgpu,
+    webgpuF16: gpu.f16,
     device,
     threads,
     simd,

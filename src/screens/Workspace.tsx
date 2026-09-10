@@ -1,36 +1,40 @@
-import { Upload, Mic } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useApp } from '@/lib/store'
 import { FileTranscriber } from '@/components/FileTranscriber'
 import { LiveMic } from '@/components/LiveMic'
 import { NoModelState } from '@/components/NoModelState'
+import { ScreenHeader } from '@/components/ScreenHeader'
 
 export function Workspace() {
   const activeModel = useApp((s) => s.activeModel)
   const setView = useApp((s) => s.setView)
+  const workspaceTab = useApp((s) => s.workspaceTab)
+  const setWorkspaceTab = useApp((s) => s.setWorkspaceTab)
 
   if (!activeModel) {
     return <NoModelState onSetup={() => setView('onboarding')} />
   }
 
   return (
-    <div className="space-y-6 py-4">
-      <div className="space-y-1">
-        <h2 className="text-2xl font-semibold tracking-tight">Transcribe</h2>
-        <p className="text-sm text-muted-foreground">
-          Current model: <span className="text-foreground">{activeModel.label}</span>. Files are
-          processed in this browser.
-        </p>
-      </div>
+    <div className="space-y-8">
+      <ScreenHeader
+        title="Transcribe"
+        subtitle="Audio and text stay in this browser."
+        aside={
+          <button
+            onClick={() => setView('onboarding')}
+            title="Change model or manage downloads"
+            className="lt-eyebrow rounded-md px-2 py-1.5 lg:hidden outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {activeModel.label}
+          </button>
+        }
+      />
 
-      <Tabs defaultValue="file">
+      <Tabs value={workspaceTab} onValueChange={(v) => setWorkspaceTab(v as 'file' | 'live')}>
         <TabsList>
-          <TabsTrigger value="file">
-            <Upload className="size-4" /> Upload a file
-          </TabsTrigger>
-          <TabsTrigger value="live">
-            <Mic className="size-4" /> Live mic
-          </TabsTrigger>
+          <TabsTrigger value="file">File</TabsTrigger>
+          <TabsTrigger value="live">Live</TabsTrigger>
         </TabsList>
         <TabsContent value="file">
           <FileTranscriber />

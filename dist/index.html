@@ -1,18 +1,34 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#07090f" />
+    <meta name="theme-color" content="#fbfaf8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#110f0c" media="(prefers-color-scheme: dark)" />
     <meta name="description" content="Private browser transcription for audio and video files." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>Local Transcribe</title>
+    <!-- Set the theme before first paint so there is no flash. `localStorage.theme` is
+         'light' | 'dark'; absent means follow the system. See ThemeToggle.tsx. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('theme')
+          var dark =
+            t === 'dark' ||
+            (t !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.classList.toggle('dark', dark)
+        } catch (e) {
+          /* private mode: fall through to the light default */
+        }
+      })()
+    </script>
     <!-- Cross-origin isolation fallback for static hosts without COOP/COEP headers.
          No-ops in dev (already isolated via Vite headers). -->
     <script src="/coi-serviceworker.js"></script>
-    <script type="module" crossorigin src="/assets/index-l4bTBJcs.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Xhw0kxex.css">
+    <script type="module" crossorigin src="/assets/index-eqtFNnSs.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BhiLdii3.css">
   </head>
   <body>
     <div id="root"></div>

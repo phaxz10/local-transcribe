@@ -1,15 +1,9 @@
-import {
-  ArrowRight,
-  FileAudio,
-  History as HistoryIcon,
-  Mic,
-  WifiOff,
-} from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import { useApp } from '@/lib/store'
 import { Button } from '@/components/ui/button'
 import { NoModelState } from '@/components/NoModelState'
-import { FeaturePoint, WorkspacePreview } from '@/components/WorkspacePreview'
-import { SupportCard } from '@/components/Support'
+import { HowItWorks } from '@/components/HowItWorks'
+import { SupportLine } from '@/components/Support'
 
 export function Landing() {
   const activeModel = useApp((s) => s.activeModel)
@@ -20,56 +14,33 @@ export function Landing() {
   }
 
   return (
-    <div className="space-y-6 py-4">
-      <div className="space-y-1">
-        <h2 className="text-2xl font-semibold tracking-tight">LocalTranscribeAI</h2>
-        <p className="text-sm text-muted-foreground">
-          Local-first transcription in this browser. Current model:{' '}
-          <span className="text-foreground">{activeModel.label}</span>.
+    <div className="space-y-16 py-6">
+      <section className="max-w-2xl space-y-6">
+        <p className="lt-eyebrow">Runs on this device</p>
+        <h1 className="text-[34px] font-semibold leading-[1.1] sm:text-[44px]">
+          Transcription that never leaves your browser.
+        </h1>
+        <p className="max-w-xl text-[17px] leading-relaxed text-muted-foreground">
+          Speak into the microphone or drop in a file. The model runs here, on your
+          machine. Nothing is uploaded, and there is no account to make.
         </p>
-      </div>
-
-      <div className="grid max-w-5xl overflow-hidden rounded-lg border bg-card md:grid-cols-[minmax(0,0.85fr)_minmax(22rem,1.15fr)]">
-        <div className="flex flex-col justify-between gap-8 p-5 md:p-6">
-          <div className="space-y-5">
-            <FeaturePoint
-              icon={WifiOff}
-              title="Stays on your device"
-              body="Audio never leaves this browser — the model runs locally."
-            />
-            <FeaturePoint
-              icon={FileAudio}
-              title="Files or live mic"
-              body="Drop in audio and video, or record straight from the mic."
-            />
-            <FeaturePoint
-              icon={HistoryIcon}
-              title="Edit, replay, export"
-              body="Refine the transcript, then export it in a click."
-            />
-          </div>
-
-          <div className="flex flex-col gap-3 border-t pt-5 sm:flex-row">
-            <Button variant="glow" onClick={() => setView('workspace')}>
-              <Mic className="size-4" />
-              Transcribe
-              <ArrowRight className="size-4" />
-            </Button>
-            <Button variant="outline" onClick={() => setView('history')}>
-              <HistoryIcon className="size-4" />
-              History
-            </Button>
-          </div>
+        <div className="flex flex-wrap items-center gap-3 pt-2">
+          <Button size="lg" onClick={() => setView('workspace')}>
+            Start transcribing
+            <ArrowRight className="size-4" />
+          </Button>
+          <Button size="lg" variant="ghost" onClick={() => setView('history')}>
+            History
+          </Button>
         </div>
+        <p className="lt-eyebrow pt-2">Model in use · {activeModel.label}</p>
+      </section>
 
-        <div className="border-t bg-background p-4 md:border-l md:border-t-0 md:p-6">
-          <WorkspacePreview />
-        </div>
-      </div>
+      <HowItWorks />
 
-      <div className="max-w-5xl">
-        <SupportCard />
-      </div>
+      <footer className="border-t pt-6">
+        <SupportLine />
+      </footer>
     </div>
   )
 }

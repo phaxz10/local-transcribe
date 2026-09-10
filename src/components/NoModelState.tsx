@@ -1,53 +1,29 @@
-import { ArrowRight, Download, FileAudio, WifiOff } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { FeaturePoint, WorkspacePreview } from '@/components/WorkspacePreview'
+import { HowItWorks } from '@/components/HowItWorks'
 
-export function NoModelState({
-  onSetup,
-}: {
-  onSetup: () => void
-}) {
+/** Shown wherever the app needs an Active Model and there isn't one yet. */
+export function NoModelState({ onSetup }: { onSetup: () => void }) {
   return (
-    <div className="space-y-6 py-4">
-      <div className="space-y-1">
-        <h2 className="text-2xl font-semibold tracking-tight">LocalTranscribeAI</h2>
-        <p className="text-sm text-muted-foreground">
-          Offline-first transcription for audio, video, and mic recordings.
+    <div className="space-y-16 py-6">
+      <section className="max-w-2xl space-y-6">
+        <p className="lt-eyebrow">Runs on this device</p>
+        <h1 className="text-[34px] font-semibold leading-[1.1] sm:text-[44px]">
+          Transcription that never leaves your browser.
+        </h1>
+        <p className="max-w-xl text-[17px] leading-relaxed text-muted-foreground">
+          Speak into the microphone or drop in a file. Choose a transcription model to
+          start. It downloads once, then works offline.
         </p>
-      </div>
-
-      <div className="grid max-w-5xl overflow-hidden rounded-lg border bg-card md:grid-cols-[minmax(0,0.85fr)_minmax(22rem,1.15fr)]">
-        <div className="flex flex-col justify-between gap-8 p-5 md:p-6">
-          <div className="space-y-5">
-            <FeaturePoint
-              icon={WifiOff}
-              title="Offline first"
-              body="After setup, the model is cached in this browser."
-            />
-            <FeaturePoint
-              icon={Download}
-              title="Load a model"
-              body="Choose the model size and language before starting."
-            />
-            <FeaturePoint
-              icon={FileAudio}
-              title="Transcribe"
-              body="Upload a file or record from the mic, then edit and export."
-            />
-          </div>
-
-          <div className="border-t pt-5">
-            <Button variant="glow" onClick={onSetup}>
-              Load Transcription Model
-              <ArrowRight className="size-4" />
-            </Button>
-          </div>
+        <div className="pt-2">
+          <Button size="lg" onClick={onSetup}>
+            Choose a model
+            <ArrowRight className="size-4" />
+          </Button>
         </div>
+      </section>
 
-        <div className="border-t bg-background p-4 md:border-l md:border-t-0 md:p-6">
-          <WorkspacePreview />
-        </div>
-      </div>
+      <HowItWorks />
     </div>
   )
 }

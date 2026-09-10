@@ -1,4 +1,5 @@
 import { ModelCard } from '@/components/ModelCard'
+import { ScreenHeader } from '@/components/ScreenHeader'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -23,20 +24,7 @@ import { benchmark, getEngine, isCancelled, type LoadStatus } from '@/lib/engine
 import { useApp } from '@/lib/store'
 import { PRIMARY_LANGUAGES, type CatalogModel, type PrimaryLanguage } from '@/lib/types'
 import { formatMb } from '@/lib/utils'
-import {
-  AlertTriangle,
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  Cpu,
-  Download,
-  HardDrive,
-  Info,
-  Loader2,
-  RotateCcw,
-  X,
-  Zap,
-} from 'lucide-react'
+import { ArrowRight, Download, Loader2, RotateCcw } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 
 type Phase = 'idle' | 'downloading' | 'calibrating' | 'error' | 'cancelled'
@@ -98,7 +86,7 @@ export function Onboarding() {
     setStatus(null)
     setPhase('downloading')
     try {
-      const asr = await getEngine(selected, capability.device, {
+      const device = await getEngine(selected, capability.device, {
         signal: ac.signal,
         onProgress: setStatus,
       })
@@ -106,7 +94,7 @@ export function Onboarding() {
       setActiveModel(selected)
       setPhase('calibrating')
       try {
-        const rtf = await benchmark(asr)
+        const rtf = await benchmark(selected, device)
         setCapability({ ...capability, benchmarkRtf: rtf })
       } catch {
         /* optional */
@@ -137,80 +125,62 @@ export function Onboarding() {
   const pct = Math.round((status?.ratio ?? 0) * 100)
 
   return (
-    <div className="space-y-8 py-4">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="space-y-1">
-          <button
-            onClick={() => setView(changing ? 'workspace' : 'landing')}
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="size-3.5" /> {changing ? 'workspace' : 'back'}
-          </button>
-          <h2 className="text-2xl font-semibold tracking-tight">
-            {changing ? 'Transcription Models' : 'Choose a transcription model'}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {changing
-              ? 'Switch models, add another one, or clear cached model files. Local data stays on this device.'
-              : 'Pick a language, cache one model, and start transcribing. You can change this later.'}
-          </p>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="lang">Primary language</Label>
-          <Select
-            value={primaryLanguage}
-            disabled={busy}
-            onValueChange={(v) => {
-              setPrimaryLanguage(v as PrimaryLanguage)
-              setSelectedId(null)
-            }}
-          >
-            <SelectTrigger id="lang" className="w-52">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PRIMARY_LANGUAGES.map((l) => (
-                <SelectItem key={l.code} value={l.code}>
-                  {l.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+    <div className="space-y-10">
+      <ScreenHeader
+        title={changing ? 'Transcription models' : 'Choose a transcription model'}
+        subtitle={
+          changing
+            ? 'Switch models, add another one, or clear cached model files. Local data stays on this device.'
+            : 'Pick a language, download one model, and start transcribing. You can change this later.'
+        }
+        back={{
+          label: changing ? 'Transcribe' : 'Back',
+          onClick: () => setView(changing ? 'workspace' : 'landing'),
+        }}
+        aside={
+          <div className="flex items-center gap-3">
+            <Label htmlFor="lang" className="text-muted-foreground">
+              Primary language
+            </Label>
+            <Select
+              value={primaryLanguage}
+              disabled={busy}
+              onValueChange={(v) => {
+                setPrimaryLanguage(v as PrimaryLanguage)
+                setSelectedId(null)
+              }}
+            >
+              <SelectTrigger id="lang" className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PRIMARY_LANGUAGES.map((l) => (
+                  <SelectItem key={l.code} value={l.code}>
+                    {l.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        }
+      />
 
       {capability && (
-        <div className="rounded-lg border bg-card p-4">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="text-sm font-medium">Browser capability check</h3>
-              <p className="text-xs text-muted-foreground">
-                Used for model suggestions. These are browser hints, not a full hardware spec.
-              </p>
-            </div>
-            <span className="text-xs capitalize text-muted-foreground">
-              Recommendation tier: {capability.tier}
-            </span>
-          </div>
-          <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-            <div className="flex items-center gap-2">
-              <Zap className="size-4 text-primary" />
-              <span>{capability.webgpu ? 'WebGPU available' : 'CPU fallback'}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Cpu className="size-4 text-muted-foreground" />
-              <span>{capability.cores} browser threads reported</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <HardDrive className="size-4 text-muted-foreground" />
-              <span>
-                {storageFree != null
-                  ? `${formatMb(storageFree)} model cache estimate`
-                  : 'Storage estimate unavailable'}
-              </span>
-            </div>
-          </div>
-        </div>
+        <dl className="grid gap-x-8 gap-y-4 border-y py-4 text-sm sm:grid-cols-4">
+          <Fact label="Engine" value={capability.webgpu ? 'WebGPU' : 'CPU fallback'} />
+          <Fact label="Threads" value={String(capability.cores)} />
+          <Fact
+            label="Free storage"
+            value={storageFree != null ? formatMb(storageFree) : 'Unknown'}
+          />
+          <Fact label="Suggestion tier" value={capability.tier} className="capitalize" />
+        </dl>
+      )}
+
+      {capability && (
+        <p className="-mt-6 text-xs text-muted-foreground">
+          Browser hints, not a full hardware spec, used only to suggest a model.
+        </p>
       )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -229,54 +199,46 @@ export function Onboarding() {
         ))}
       </div>
 
-      <div className="relative z-10 mx-auto flex w-full max-w-2xl flex-col gap-3 rounded-lg border bg-card p-4 shadow-lg sm:sticky sm:bottom-4">
+      <div className="sticky bottom-4 z-10 rounded-lg border bg-popover p-4 shadow-lg">
         {busy ? (
           phase === 'downloading' ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2">
-                  <Loader2 className="size-4 animate-spin text-primary" />
-                  Downloading {selected?.label}...
+            <div className="space-y-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="lt-eyebrow flex items-center gap-2">
+                  <Loader2 className="size-3 animate-spin text-primary" />
+                  Downloading {selected?.label}
                 </span>
-                <span className="tabular-nums text-muted-foreground">{pct}%</span>
+                <span className="lt-num text-sm">{pct}%</span>
               </div>
               <Progress value={pct} />
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span className="tabular-nums">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="lt-num text-xs text-muted-foreground">
                   {status && status.totalBytes > 0
                     ? `${formatMb(status.loadedBytes / 1e6)} / ${formatMb(
                         status.totalBytes / 1e6,
-                      )}, file ${status.fileIndex}/${status.fileCount}`
-                    : 'Starting...'}
+                      )} · file ${status.fileIndex}/${status.fileCount}`
+                    : 'Starting'}
                 </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={cancelDownload}
-                  className="text-destructive"
-                >
-                  <X className="size-4" /> Cancel
+                <Button variant="ghost" size="sm" onClick={cancelDownload}>
+                  Cancel
                 </Button>
               </div>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Downloads cannot resume. Cancelling means starting over next time.
               </p>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm">
-              <Loader2 className="size-4 animate-spin text-primary" /> Calibrating your browser...
-            </div>
+            <p className="lt-eyebrow flex items-center gap-2">
+              <Loader2 className="size-3 animate-spin text-primary" /> Calibrating your
+              browser
+            </p>
           )
         ) : phase === 'error' ? (
-          <div className="space-y-3">
-            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2.5 text-sm text-destructive">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              <span>{error}</span>
-            </div>
-            <div className="flex justify-end gap-2">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">{error}</p>
+            <div className="flex shrink-0 gap-2">
               <Button
                 variant="ghost"
-                size="sm"
                 onClick={() => {
                   setError(null)
                   setPhase('idle')
@@ -284,62 +246,53 @@ export function Onboarding() {
               >
                 Choose another
               </Button>
-              <Button variant="glow" size="sm" onClick={provision}>
-                <RotateCcw className="size-4" /> Retry
+              <Button onClick={provision}>
+                <RotateCcw className="size-4" /> Try again
               </Button>
             </div>
           </div>
         ) : phase === 'cancelled' ? (
-          <div className="space-y-3">
-            <div className="flex items-start gap-2 rounded-md border bg-card p-2.5 text-sm text-muted-foreground">
-              <Info className="mt-0.5 size-4 shrink-0" />
-              <span>Download cancelled. Retrying starts the download over. There is no resume.</span>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setPhase('idle')}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              Download cancelled. Starting again downloads from the beginning.
+            </p>
+            <div className="flex shrink-0 gap-2">
+              <Button variant="ghost" onClick={() => setPhase('idle')}>
                 Choose another
               </Button>
-              <Button variant="glow" size="sm" onClick={provision}>
-                <RotateCcw className="size-4" /> Retry download
+              <Button onClick={provision}>
+                <RotateCcw className="size-4" /> Download again
               </Button>
             </div>
           </div>
         ) : (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-            <div className="text-sm">
-              <div className="font-medium">{selected?.label ?? 'Select a model'}</div>
-              <div className="text-xs text-muted-foreground">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">
+                {selected?.label ?? 'Select a model'}
+              </div>
+              <div className="lt-eyebrow mt-1.5">
                 {selected
                   ? selectedActive
-                    ? 'Currently active on this device'
+                    ? 'Active on this device'
                     : selectedProvisioned
-                      ? 'Downloaded. Switch instantly'
-                      : `${formatMb(selected.sizeMb)}. Cached after first download`
+                      ? 'Downloaded · switches instantly'
+                      : `${formatMb(selected.sizeMb)} · cached after the first download`
                   : 'Pick a model to continue'}
               </div>
             </div>
             {selected &&
               (selectedActive ? (
-                <Button
-                  variant="glow"
-                  size="lg"
-                  className="w-full sm:w-auto"
-                  onClick={() => setView('workspace')}
-                >
+                <Button className="w-full sm:w-auto" onClick={() => setView('workspace')}>
                   Open workspace <ArrowRight className="size-4" />
                 </Button>
               ) : selectedProvisioned ? (
-                <Button
-                  variant="glow"
-                  size="lg"
-                  className="w-full sm:w-auto"
-                  onClick={() => switchTo(selected)}
-                >
-                  <Check className="size-4" /> Switch to this model
+                <Button className="w-full sm:w-auto" onClick={() => switchTo(selected)}>
+                  Use this model
                 </Button>
               ) : (
-                <Button variant="glow" size="lg" className="w-full sm:w-auto" onClick={provision}>
-                  <Download className="size-4" /> Download &amp; continue
+                <Button className="w-full sm:w-auto" onClick={provision}>
+                  <Download className="size-4" /> Download and continue
                 </Button>
               ))}
           </div>
@@ -355,7 +308,8 @@ export function Onboarding() {
               {evictTarget && activeModel?.id === evictTarget.id
                 ? ' and unloads it as your active model'
                 : ''}
-              . Your transcripts and settings are kept, and you can download it again anytime.
+              . Your transcripts and settings are kept, and you can download it again
+              anytime.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -368,6 +322,23 @@ export function Onboarding() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+function Fact({
+  label,
+  value,
+  className,
+}: {
+  label: string
+  value: string
+  className?: string
+}) {
+  return (
+    <div className="space-y-1.5">
+      <dt className="lt-eyebrow">{label}</dt>
+      <dd className={className}>{value}</dd>
     </div>
   )
 }

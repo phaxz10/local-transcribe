@@ -113,8 +113,10 @@ export interface CapabilityReport {
   deviceMemoryGb: number | null
   mobile: boolean
   crossOriginIsolated: boolean
-  /** WebGPU is available and will be used for inference. */
+  /** WebGPU is available *and* usable (needs shader-f16), so it will be used for inference. */
   webgpu: boolean
+  /** The adapter reports the `shader-f16` feature our fp16 weights require. */
+  webgpuF16: boolean
   /** Chosen inference backend. */
   device: EngineDevice
   threads: boolean

@@ -1,17 +1,9 @@
-import {
-  FileText,
-  Mic,
-  Trash2,
-  Clock,
-  ChevronRight,
-  ShieldAlert,
-  Inbox,
-} from 'lucide-react'
+import { Mic, Trash2, FileText } from 'lucide-react'
 import { useApp } from '@/lib/store'
 import { deleteTranscript, wipeEverything } from '@/lib/db'
 import { formatTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { ScreenHeader } from '@/components/ScreenHeader'
 import {
   Dialog,
   DialogTrigger,
@@ -49,28 +41,78 @@ export function HistoryView() {
   }
 
   return (
-    <div className="space-y-5 py-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">History</h2>
+    <div className="space-y-10">
+      <ScreenHeader
+        title="History"
+        subtitle="Transcripts are stored in this browser. Media is not kept, so reattach a file to replay."
+      />
+
+      {history.length === 0 ? (
+        <div className="space-y-5 py-12 text-center">
           <p className="text-sm text-muted-foreground">
-            Transcripts are stored in this browser. Media is not kept, so reattach a file to replay.
+            No transcripts yet. They will appear here once you record or transcribe a file.
           </p>
+          <Button onClick={() => setView(activeModel ? 'workspace' : 'onboarding')}>
+            Start transcribing
+          </Button>
         </div>
-        {/* Always available: downloaded models live in the cache even when there are
-            zero transcripts, so this is the only way to reclaim that storage here. */}
+      ) : (
+        <ul className="border-t">
+          {history.map((rec) => (
+            <li key={rec.id} className="group flex items-center gap-2 border-b">
+              <button
+                onClick={() => void open(rec.id)}
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-md py-3.5 pr-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {rec.source.hash.startsWith('live:') ? (
+                  <Mic className="size-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[15px] group-hover:underline">
+                    {rec.source.filename}
+                  </span>
+                  <span className="lt-eyebrow mt-1.5 block truncate">
+                    {new Date(rec.createdAt).toLocaleDateString()} ·{' '}
+                    {formatTime(rec.source.durationSec)} · {wordCount(rec)} words ·{' '}
+                    {rec.model}
+                  </span>
+                </span>
+              </button>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                title={`Delete ${rec.source.filename}`}
+                aria-label={`Delete ${rec.source.filename}`}
+                className="shrink-0 text-muted-foreground hover:text-destructive-soft"
+                onClick={() => void remove(rec.id)}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Always available: downloaded models live in the cache even when there are
+          zero transcripts, so this is the only way to reclaim that storage here. */}
+      <footer className="flex flex-wrap items-center justify-between gap-3 pt-4">
+        <p className="text-xs text-muted-foreground">
+          Everything here lives in this browser only.
+        </p>
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant="outline" size="sm" className="text-destructive">
-              <ShieldAlert className="size-4" /> Wipe everything
+            <Button variant="ghost" size="sm" className="text-muted-foreground">
+              Erase all local data
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Erase all local data?</DialogTitle>
               <DialogDescription>
-                This deletes every transcript, your settings, and the downloaded
-                models from this browser. It cannot be undone.
+                This deletes every transcript, your settings, and the downloaded models
+                from this browser. It cannot be undone.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -83,62 +125,7 @@ export function HistoryView() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </div>
-
-      {history.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-            <Inbox className="size-8" />
-            <p>No transcripts yet. Your work will appear here.</p>
-            <Button
-              variant="glow"
-              onClick={() => {
-                setView(activeModel ? 'workspace' : 'onboarding')
-              }}
-            >
-              Start transcribing
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-2">
-          {history.map((rec) => (
-            <Card key={rec.id} className="transition-colors hover:border-primary/50">
-              <CardContent className="flex items-center gap-3 p-3">
-                <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-                  {rec.source.hash.startsWith('live:') ? (
-                    <Mic className="size-4" />
-                  ) : (
-                    <FileText className="size-4" />
-                  )}
-                </span>
-                <button onClick={() => void open(rec.id)} className="min-w-0 flex-1 text-left">
-                  <div className="truncate font-medium">{rec.source.filename}</div>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Clock className="size-3" /> {formatTime(rec.source.durationSec)}
-                    </span>
-                    <span>{wordCount(rec)} words</span>
-                    <span>{rec.model}</span>
-                    <span>{new Date(rec.createdAt).toLocaleDateString()}</span>
-                  </div>
-                </button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="text-muted-foreground hover:text-destructive"
-                  onClick={() => void remove(rec.id)}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-                <button onClick={() => void open(rec.id)}>
-                  <ChevronRight className="size-4 text-muted-foreground" />
-                </button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      </footer>
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { useApp, viewFromHash } from '@/lib/store'
 import { TopBar } from '@/components/TopBar'
+import { LivePip } from '@/components/LivePip'
 import { Landing } from '@/screens/Landing'
 import { Onboarding } from '@/screens/Onboarding'
 import { Workspace } from '@/screens/Workspace'
@@ -11,8 +12,8 @@ import { HistoryView } from '@/screens/HistoryView'
 
 function Booting() {
   return (
-    <div className="flex flex-1 items-center justify-center py-32 text-muted-foreground">
-      <Loader2 className="mr-2 size-5 animate-spin" /> Preparing workspace...
+    <div className="flex flex-1 items-center justify-center py-32 text-sm text-muted-foreground">
+      <Loader2 className="mr-2 size-4 animate-spin" /> Preparing workspace
     </div>
   )
 }
@@ -38,9 +39,9 @@ export default function App() {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="app-aurora flex min-h-full flex-col">
+      <div className="flex min-h-full flex-col">
         <TopBar />
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-20 pt-6 md:px-6">
+        <main className="mx-auto w-full max-w-4xl flex-1 px-4 pb-24 pt-10 md:px-6">
           {!ready ? (
             <Booting />
           ) : view === 'landing' ? (
@@ -55,6 +56,7 @@ export default function App() {
             <HistoryView />
           ) : null}
         </main>
+        <LivePip />
       </div>
     </TooltipProvider>
   )

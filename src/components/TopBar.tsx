@@ -1,14 +1,9 @@
-import {
-  Mic,
-  History as HistoryIcon,
-  Cpu,
-  CircleDot,
-  ChevronsUpDown,
-  Coffee,
-} from 'lucide-react'
+import type { ReactNode } from 'react'
+import { Mic, History as HistoryIcon, ChevronsUpDown, Coffee } from 'lucide-react'
 import { useApp } from '@/lib/store'
 import { Button } from '@/components/ui/button'
 import { JobIndicator } from '@/components/JobIndicator'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { BUYMEACOFFEE_URL } from '@/components/Support'
 import { cn } from '@/lib/utils'
 
@@ -20,73 +15,116 @@ export function TopBar() {
   const isolated = capability?.crossOriginIsolated
 
   return (
-    <header className="sticky top-0 z-30 border-b bg-background/70 backdrop-blur-xl">
-      <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-3 px-4 md:px-6">
+    <header className="sticky top-0 z-30 border-b bg-background/90 backdrop-blur">
+      <div className="mx-auto flex h-14 w-full max-w-4xl items-center gap-1 px-4 md:px-6">
         <button
           onClick={() => setView(activeModel ? 'workspace' : 'landing')}
-          className="flex items-center gap-2"
+          className="-ml-1 flex h-10 items-center gap-2 rounded-md px-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title="Home"
         >
-          <span className="grid size-7 place-items-center rounded-md bg-foreground text-background dark:bg-primary dark:text-primary-foreground">
-            <Mic className="size-4" />
-          </span>
-          <span className="hidden font-semibold tracking-tight sm:inline">
+          <Mic className="size-4 text-primary" />
+          <span className="text-[15px] font-semibold tracking-tight">
             LocalTranscribeAI
           </span>
         </button>
 
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex items-center gap-0.5">
           <JobIndicator />
+
+          <nav className="flex items-center gap-0.5">
+            <NavLink
+              active={view === 'workspace'}
+              onClick={() => setView('workspace')}
+              icon={<Mic className="size-4" />}
+              label="Transcribe"
+            />
+            <NavLink
+              active={view === 'history'}
+              onClick={() => setView('history')}
+              icon={<HistoryIcon className="size-4" />}
+              label="History"
+            />
+          </nav>
+
           {activeModel && (
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setView('onboarding')}
               title="Change model or manage downloads"
-              className="hidden gap-1 md:inline-flex"
+              className="ml-1 hidden h-10 gap-1.5 text-muted-foreground hover:text-foreground lg:inline-flex"
             >
-              <Cpu className="size-3" /> {activeModel.label}
+              <span className="lt-eyebrow text-inherit">{activeModel.label}</span>
               <ChevronsUpDown className="size-3 opacity-60" />
             </Button>
           )}
+
+          <span className="mx-1 hidden h-5 w-px bg-border sm:block" />
+
+          <ThemeToggle />
+
           <Button
-            variant={view === 'workspace' ? 'secondary' : 'ghost'}
-            size="sm"
-            onClick={() => setView('workspace')}
-            title="Transcribe"
+            variant="ghost"
+            size="icon"
+            asChild
+            className="text-muted-foreground hover:text-foreground"
           >
-            <Mic className="size-4" />
-            <span className="hidden sm:inline">Transcribe</span>
-          </Button>
-          <Button
-            variant={view === 'history' ? 'secondary' : 'ghost'}
-            size="sm"
-            onClick={() => setView('history')}
-            title="History"
-          >
-            <HistoryIcon className="size-4" />
-            <span className="hidden sm:inline">History</span>
-          </Button>
-          <Button variant="ghost" size="sm" asChild title="Support this project">
-            <a href={BUYMEACOFFEE_URL} target="_blank" rel="noopener noreferrer">
+            <a
+              href={BUYMEACOFFEE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Buy me a coffee"
+              aria-label="Buy me a coffee"
+            >
               <Coffee className="size-4" />
-              <span className="hidden sm:inline">Support</span>
             </a>
           </Button>
+
           <span
             title={
               isolated
                 ? 'Cross-origin isolated. Multi-thread engine active.'
                 : 'Not cross-origin isolated. Engine limited.'
             }
+            aria-label={
+              isolated ? 'Multi-thread engine active' : 'Engine limited to a single thread'
+            }
             className={cn(
-              'ml-1 hidden items-center gap-1 text-xs sm:flex',
-              isolated ? 'text-primary' : 'text-destructive',
+              'ml-1 hidden size-1.5 shrink-0 rounded-full sm:block',
+              isolated ? 'bg-primary' : 'bg-destructive-soft',
             )}
-          >
-            <CircleDot className="size-3.5" />
-          </span>
+          />
         </div>
       </div>
     </header>
+  )
+}
+
+function NavLink({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: ReactNode
+  label: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        'inline-flex h-10 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+        active
+          ? 'bg-secondary text-foreground'
+          : 'text-muted-foreground hover:text-foreground',
+      )}
+    >
+      {icon}
+      <span className="hidden sm:inline">{label}</span>
+    </button>
   )
 }

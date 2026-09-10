@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { Upload, FileAudio, Loader2, Clock, Cpu, Square } from 'lucide-react'
+import { FileAudio, Square } from 'lucide-react'
 import { useApp } from '@/lib/store'
 import { cn, formatTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { Card, CardContent } from '@/components/ui/card'
 
 export function FileTranscriber() {
   const activeModel = useApp((s) => s.activeModel)
   const job = useApp((s) => s.job)
+  const liveBusy = useApp((s) => s.live?.status === 'recording' || s.live?.status === 'transcribing')
   const runFileJob = useApp((s) => s.runFileJob)
   const stopActiveJob = useApp((s) => s.stopActiveJob)
 
@@ -38,83 +38,91 @@ export function FileTranscriber() {
   if (fileJob) {
     const statusText =
       fileJob.phase === 'decoding'
-        ? 'Decoding audio with ffmpeg...'
+        ? 'Decoding audio'
         : fileJob.phase === 'loading'
-          ? 'Loading model...'
+          ? 'Loading model'
           : fileJob.phase === 'cancelling'
-            ? 'Stopping transcription...'
-            : 'Transcribing in this browser...'
+            ? 'Stopping'
+            : 'Transcribing'
     return (
-      <Card>
-        <CardContent className="space-y-5 p-6">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="flex items-center gap-2">
-                <Loader2 className="size-4 animate-spin text-primary" />
-                {statusText}
-              </span>
-              {fileJob.phase !== 'cancelling' && (
-                <span className="tabular-nums text-muted-foreground">{fileJob.pct}%</span>
-              )}
-            </div>
-            {fileJob.phase === 'cancelling' ? (
-              <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
-                <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
-              </div>
-            ) : (
-              <Progress value={fileJob.pct} />
+      <div className="space-y-8">
+        <div className="space-y-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="lt-eyebrow">{statusText}</span>
+            {fileJob.phase !== 'cancelling' && (
+              <span className="lt-num text-sm">{fileJob.pct}%</span>
             )}
+          </div>
+          {fileJob.phase === 'cancelling' ? (
+            <div className="h-1 w-full overflow-hidden rounded-full bg-secondary">
+              <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
+            </div>
+          ) : (
+            <Progress value={fileJob.pct} />
+          )}
+          <div className="space-y-1 text-xs leading-relaxed text-muted-foreground">
+            <p className="truncate" title={fileJob.label}>
+              {fileJob.label}
+            </p>
             {fileJob.phase === 'transcribing' && fileJob.etaSec != null && (
-              <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                <Clock className="size-3" /> ~{formatTime(fileJob.etaSec)} estimated
-              </p>
+              <p className="lt-num">~{formatTime(fileJob.etaSec)} left</p>
             )}
             {(fileJob.phase === 'loading' || fileJob.phase === 'transcribing') && (
-              <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                <Cpu className="size-3" /> {fileJob.device === 'webgpu' ? 'WebGPU' : 'WASM'}.
+              <p>
+                {fileJob.device === 'webgpu' ? 'WebGPU' : 'WASM'}.
                 {fileJob.phase === 'loading'
-                  ? ' First run downloads the model, then it is cached.'
-                  : ' Runs in bounded chunks — you can leave this page, it keeps going.'}
+                  ? ' The first run downloads the model, then it is cached.'
+                  : ' Runs in bounded chunks. You can leave this page and it keeps going.'}
               </p>
             )}
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={stopActiveJob}
-            disabled={fileJob.phase === 'cancelling'}
-            className="w-fit"
+        </div>
+
+        <Button
+          variant="outline"
+          onClick={stopActiveJob}
+          disabled={fileJob.phase === 'cancelling'}
+          className="w-fit"
+        >
+          <Square className="size-3.5 fill-current" /> Stop
+        </Button>
+
+        {partial && (
+          <div
+            ref={liveBoxRef}
+            onScroll={(e) => {
+              const el = e.currentTarget
+              stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+            }}
+            className="lt-measure max-h-72 overflow-y-auto rounded-lg border bg-card px-5 py-4 text-[15px] leading-[1.8] text-muted-foreground"
           >
-            <Square className="size-3.5 fill-current" /> Stop
-          </Button>
-          {partial && (
-            <div
-              ref={liveBoxRef}
-              onScroll={(e) => {
-                const el = e.currentTarget
-                stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
-              }}
-              className="max-h-48 overflow-y-auto rounded-lg border bg-background/50 p-3 text-sm leading-relaxed text-muted-foreground"
-            >
-              {partial}
-              <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-primary align-middle" />
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            {partial}
+            <span
+              className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-primary align-middle"
+              aria-hidden="true"
+            />
+          </div>
+        )}
+      </div>
     )
   }
 
-  // A different job (a rerun) is running in the background — don't offer a dead dropzone.
+  // One shared Engine: a file job would starve the Live Session's interim ticks.
+  if (liveBusy) {
+    return (
+      <p className="py-10 text-center text-sm text-muted-foreground">
+        A live recording is in progress. Stop it to transcribe a file.
+      </p>
+    )
+  }
+
+  // A different job (a rerun) is running in the background, don't offer a dead dropzone.
   if (job) {
     return (
-      <Card>
-        <CardContent className="flex items-center gap-3 p-6 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin text-primary" />
-          A transcription is already running. It finishes in the background — watch its progress
-          up top, or wait here.
-        </CardContent>
-      </Card>
+      <p className="py-10 text-center text-sm text-muted-foreground">
+        A transcription is already running. It finishes in the background. Watch its
+        progress up top, or wait here.
+      </p>
     )
   }
 
@@ -132,24 +140,21 @@ export function FileTranscriber() {
         if (f) void handleFile(f)
       }}
       className={cn(
-        'flex flex-col items-center justify-center gap-4 rounded-lg border-2 border-dashed p-14 text-center transition-colors',
+        'flex flex-col items-center justify-center gap-5 rounded-lg border border-dashed px-6 py-16 text-center transition-colors sm:py-20',
         dragging ? 'border-primary bg-primary/5' : 'border-border',
       )}
     >
-      <span className="grid size-14 place-items-center rounded-2xl bg-primary/15 text-primary">
-        <Upload className="size-7" />
-      </span>
-      <div>
-        <p className="font-medium">Drop an audio or video file</p>
+      <div className="space-y-2">
+        <p className="text-base font-medium">Drop an audio or video file</p>
         <p className="text-sm text-muted-foreground">
-          MP3, WAV, M4A, MP4, MOV, or MKV. The file stays in this browser.
+          MP3, WAV, M4A, MP4, MOV, or MKV. It stays in this browser.
         </p>
       </div>
       <Button onClick={() => inputRef.current?.click()}>
         <FileAudio className="size-4" /> Choose file
       </Button>
       <p className="text-xs text-muted-foreground">
-        Edit the transcript afterward. Corrections autosave locally.
+        Edit the transcript afterwards. Corrections autosave locally.
       </p>
       <input
         ref={inputRef}

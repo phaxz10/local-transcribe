@@ -6,14 +6,14 @@ type Entry = Omit<CatalogModel, 'available'>
 
 // ONNX Whisper models loaded by Transformers.js (ADR-0007). Sizes are approximate.
 // Deliberately scoped to Small (the smallest tier that doesn't hallucinate/loop on hard audio)
-// and Large v3 Turbo — the tiny/base tiers were dropped because they loop on real meetings.
+// and Large v3 Turbo, the tiny/base tiers were dropped because they loop on real meetings.
 const ENTRIES: Entry[] = [
   { id: 'small.en', label: 'Small (English)', task: 'transcription', family: 'small', hfId: 'Xenova/whisper-small.en', englishOnly: true, multilingual: false, sizeMb: 520, ramCeilingMb: 1200, requiresWebGPU: false, languages: { en: 3 } },
   { id: 'small', label: 'Small', task: 'transcription', family: 'small', hfId: 'Xenova/whisper-small', englishOnly: false, multilingual: true, sizeMb: 520, ramCeilingMb: 1200, requiresWebGPU: false, languages: { en: 2, zh: 2, ja: 2, yue: 1, tl: 2 } },
   // We request word-level timestamps (return_timestamps: 'word'), which needs a decoder exported
   // WITH cross-attentions. The canonical `whisper-large-v3-turbo` export lacks them and throws
   // "Model outputs must contain cross attentions"; the `_timestamped` sibling is re-exported with
-  // output_attentions=True (same q4/fp16 ONNX variants). Don't revert this id — it reintroduces the crash.
+  // output_attentions=True (same q4/fp16 ONNX variants). Don't revert this id, it reintroduces the crash.
   { id: 'large-v3-turbo', label: 'Large v3 Turbo', task: 'transcription', family: 'large-v3-turbo', hfId: 'onnx-community/whisper-large-v3-turbo_timestamped', englishOnly: false, multilingual: true, sizeMb: 1600, ramCeilingMb: 2400, requiresWebGPU: true, languages: { en: 3, zh: 3, ja: 3, yue: 2, tl: 2 } },
 ]
 

@@ -5,7 +5,7 @@ import { uid } from './utils'
 const SENTENCE_END = /[.!?。！？…]["'”’)\]]?$/
 
 /** Build the immutable ASR layer from a Transformers.js word-timestamp result (ADR-0005). */
-export function buildAsrLayer(out: ASRResult, language = 'auto'): AsrLayer {
+export function buildAsrLayer(out: ASRResult, language = 'auto', offsetSeconds = 0): AsrLayer {
   const words: AsrWord[] = []
   let prevEnd = 0
   for (const c of out.chunks ?? []) {
@@ -15,10 +15,11 @@ export function buildAsrLayer(out: ASRResult, language = 'auto'): AsrLayer {
     const end = c.timestamp?.[1] ?? start + 0.2
     prevEnd = end
     // Transformers.js doesn't expose per-token probability → confidence unknown (=1).
-    words.push({ id: uid('w_'), text, start, end, confidence: 1 })
+    // Live ticks transcribe only the uncommitted tail, shift its times back onto the recording.
+    words.push({ id: uid('w_'), text, start: start + offsetSeconds, end: end + offsetSeconds, confidence: 1 })
   }
   if (words.length === 0 && out.text?.trim()) {
-    words.push({ id: uid('w_'), text: out.text.trim(), start: 0, end: 0.5, confidence: 1 })
+    words.push({ id: uid('w_'), text: out.text.trim(), start: offsetSeconds, end: offsetSeconds + 0.5, confidence: 1 })
   }
 
   // Group words into segments on sentence punctuation, a long pause, or max length.

@@ -1,4 +1,4 @@
-import { Check, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import type { CatalogModel } from '@/lib/types'
 import { cn, formatMb } from '@/lib/utils'
 
@@ -17,7 +17,10 @@ function Dots({ q }: { q: number }) {
       {[1, 2, 3].map((i) => (
         <span
           key={i}
-          className={cn('size-1.5 rounded-full', i <= q ? 'bg-primary' : 'bg-muted-foreground/30')}
+          className={cn(
+            'size-1 rounded-full',
+            i <= q ? 'bg-foreground/70' : 'bg-foreground/15',
+          )}
         />
       ))}
     </span>
@@ -52,11 +55,9 @@ export function ModelCard({
       ? 'Downloaded'
       : recommended
         ? 'Recommended'
-        : selected
-          ? 'Selected'
-          : ''
-  const modelScope = model.multilingual ? 'Multilingual model' : 'English-only model'
-  const engineNote = model.requiresWebGPU ? 'Requires WebGPU' : 'Runs on WebGPU or CPU'
+        : ''
+  const modelScope = model.multilingual ? 'Multilingual' : 'English only'
+  const engineNote = model.requiresWebGPU ? 'Requires WebGPU' : 'WebGPU or CPU'
 
   return (
     <div
@@ -72,63 +73,61 @@ export function ModelCard({
         }
       }}
       className={cn(
-        'group relative flex flex-col gap-3 rounded-lg border bg-card p-4 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60',
-        disabled
-          ? 'cursor-not-allowed opacity-55'
-          : 'cursor-pointer hover:border-primary/60',
+        'flex flex-col gap-3 rounded-lg border bg-card p-4 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:border-foreground/25',
         selected && 'border-primary ring-1 ring-primary',
-        active && !selected && 'border-primary/60',
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-2 font-medium">{model.label}</div>
-          <div className="text-xs text-muted-foreground">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-[15px] font-medium">{model.label}</div>
+          <div className="lt-eyebrow mt-1.5">
             {provisioned
-              ? 'Downloaded. Ready offline'
+              ? 'Ready offline'
               : model.sizeMb > 0
                 ? `${formatMb(model.sizeMb)} download`
                 : 'Size varies'}
           </div>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
-          {status && (
-            <span className="text-xs font-medium text-primary">
-              {status}
-            </span>
-          )}
-          {selected && !active && !provisioned && !recommended && (
-            <span className="grid size-5 place-items-center rounded-full bg-primary text-primary-foreground">
-              <Check className="size-3" />
-            </span>
-          )}
-          {provisioned && onEvict && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onEvict(model)
-              }}
-              className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-destructive focus-visible:text-destructive focus-visible:outline-none"
-              title="Remove this model from cache (Evict)"
-            >
-              <Trash2 className="size-3" /> Remove
-            </button>
-          )}
-        </div>
+        {status && (
+          <span
+            className={cn(
+              'lt-eyebrow shrink-0',
+              (active || recommended) && 'text-primary',
+            )}
+          >
+            {status}
+          </span>
+        )}
       </div>
 
-      <div className="text-sm leading-6 text-muted-foreground">
+      <p className="text-sm leading-relaxed text-muted-foreground">
         {modelScope}. {engineNote}.
-      </div>
+      </p>
 
-      <div className="grid grid-cols-5 gap-1 border-t pt-2.5">
-        {TRANSCRIPTION_LANG_ORDER.map((l) => (
-          <div key={l} className="flex flex-col items-center gap-1">
-            <span className="text-[10px] font-medium text-muted-foreground">{LANG_LABELS[l]}</span>
-            <Dots q={model.languages[l] ?? 0} />
-          </div>
-        ))}
+      <div className="mt-auto flex items-center justify-between gap-3 border-t pt-3">
+        <div className="flex items-center gap-3">
+          {TRANSCRIPTION_LANG_ORDER.map((l) => (
+            <div key={l} className="flex flex-col items-center gap-1">
+              <span className="lt-eyebrow text-[10px]">{LANG_LABELS[l]}</span>
+              <Dots q={model.languages[l] ?? 0} />
+            </div>
+          ))}
+        </div>
+        {provisioned && onEvict && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onEvict(model)
+            }}
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-destructive-soft focus-visible:ring-2 focus-visible:ring-ring"
+            title={`Remove ${model.label} from this device`}
+            aria-label={`Remove ${model.label} from this device`}
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        )}
       </div>
     </div>
   )
