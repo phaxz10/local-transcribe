@@ -9,6 +9,7 @@
  */
 import { AutoModel, Tensor, pipeline, env, WhisperTextStreamer } from '@huggingface/transformers'
 import type { CatalogModel, EngineDevice } from './types'
+import { interpolateWords, type SpeechRegion } from './interpolate-times'
 import {
   MAX_CHUNK_SECONDS,
   VAD_WINDOW_SAMPLES,
@@ -41,6 +42,11 @@ export interface ASRResult {
    * was unavailable and the peak-based fallback ran.
    */
   speech?: Region[]
+  /**
+   * Where the word times in `chunks` came from. Absent = 'word' (the normal Whisper case).
+   * 'chunk' = the cross-attention degrade below; 'interpolated' = manufactured (ADR-0016).
+   */
+  timing?: 'word' | 'chunk' | 'interpolated'
 }
 
 export interface LoadStatus {
@@ -95,12 +101,26 @@ export type WorkerEvent =
 
 /* ── Pipeline ─────────────────────────────────────────────────────────────── */
 
+/** The bits of a Transformers.js Tensor the CTC alignment below touches. */
+interface LogitsTensor {
+  dims: number[]
+  to(type: 'float32'): { data: { [i: number]: number } }
+}
+
 // Transformers.js ASR pipeline type is complex; alias loosely.
 type ASR = Awaited<ReturnType<typeof pipeline>> & {
   (audio: Float32Array, opts?: Record<string, unknown>): Promise<ASRResult>
-  tokenizer: unknown
+  tokenizer: { model: { vocab: string[] } }
+  /** Reached directly only on the CTC path (see `transcribeCtc`). */
+  model: ((inputs: unknown) => Promise<{ logits: LogitsTensor }>) & {
+    config: { model_type?: string; pad_token_id?: number }
+  }
+  processor: (audio: Float32Array) => Promise<unknown>
   dispose?: () => Promise<void>
 }
+
+/** "No build for this device at all" — `dtypeFor` turns it into a readable error. */
+const UNSUPPORTED = Symbol('unsupported')
 
 /**
  * Per-model dtype escapes, keyed by hfId. MIRRORED in `download.ts#DTYPE_OVERRIDES`, keep in step.
@@ -110,16 +130,35 @@ type ASR = Awaited<ReturnType<typeof pipeline>> & {
  * export proved loads cleanly through onnxruntime-web's graph validator. Its q4f16 encoder (54 MB)
  * is tempting and rejected: 4-bit is *below* the int8 encoder the family rule already forbids.
  * WASM is left to the family default (fp32 encoder + q8 decoder), which is already right.
+ *
+ * `cohere-transcribe-03-2026-ONNX`: 2B params, >90% of them in the Conformer encoder. q4f16
+ * (1.44 GB encoder + 98 MB decoder) is the only variant in the GPU budget, and the repo's own
+ * `transformers.js_config` pins the kv-cache to float16 for exactly that dtype. It ships no CPU
+ * build at all, hence UNSUPPORTED on WASM: the catalog entry is `requiresWebGPU`, so that only
+ * fires if something forces the fallback, and a clear error beats Whisper dtype names on a
+ * non-Whisper graph.
  */
 const DTYPE_OVERRIDES: Record<string, Partial<Record<EngineDevice, unknown>>> = {
   'onnx-community/whisper-small-cantonese-ONNX': {
     webgpu: { encoder_model: 'fp16', decoder_model_merged: 'q4' },
   },
+  'onnx-community/cohere-transcribe-03-2026-ONNX': {
+    webgpu: 'q4f16',
+    wasm: UNSUPPORTED,
+  },
 }
 
 function dtypeFor(model: CatalogModel, device: EngineDevice): unknown {
   const override = DTYPE_OVERRIDES[model.hfId]?.[device]
+  if (override === UNSUPPORTED) {
+    throw new Error(`${model.label} needs WebGPU and has no CPU build; pick another model.`)
+  }
   if (override) return override
+  // Parakeet CTC ships ONE `onnx/model_<dtype>.onnx` (+ external `.onnx_data`), no encoder/decoder
+  // split, so the dtype is a single string. int8 is safe here: the "never an int8 encoder" rule
+  // below is WHISPER-specific (an autoregressive decoder amplifies encoder noise into a repetition
+  // loop). A CTC model emits one label per frame and cannot loop, so it takes the small download.
+  if (model.family === 'parakeet-ctc') return device === 'webgpu' ? 'q4f16' : 'int8'
   const large = model.family === 'large-v3-turbo'
   if (device === 'webgpu') {
     // large-v3-turbo: fp16 encoder + 4-bit decoder. (The onnx-community fp16 *merged decoder* trips
@@ -387,12 +426,21 @@ function offsetResult(out: ASRResult, offsetSeconds: number): ASRResult {
   }
 }
 
+/** Worst granularity wins: one interpolated chunk makes the whole transcript approximate. */
+function mergeTiming(results: ASRResult[]): ASRResult['timing'] {
+  if (results.some((r) => r.timing === 'interpolated')) return 'interpolated'
+  if (results.some((r) => r.timing === 'chunk')) return 'chunk'
+  return undefined
+}
+
 function mergeResults(results: ASRResult[]): ASRResult {
   const speech = results.flatMap((r) => r.speech ?? [])
+  const timing = mergeTiming(results)
   return {
     text: results.map((r) => r.text?.trim()).filter(Boolean).join(' '),
     chunks: results.flatMap((r) => r.chunks ?? []),
     ...(speech.length ? { speech } : {}),
+    ...(timing ? { timing } : {}),
   }
 }
 
@@ -423,14 +471,130 @@ function hasDetectableSignalFallback(pcm: Int16Array): boolean {
   return false
 }
 
+/**
+* One encoder frame = 10 ms mel hop (`hop_length` 160 @ 16 kHz) × `subsampling_factor` 8 = 80 ms.
+ * Both numbers come from the repo's own preprocessor_config.json / config.json.
+ */
+const CTC_FRAME_SECONDS = 0.08
+
+/**
+ * Word timestamps for a CTC model, by hand.
+ *
+ * v4.2.0's ASR pipeline sends `parakeet_ctc` down the `_call_wav2vec2` branch, which greedy-decodes
+ * and returns `{ text }` ONLY — it ignores `return_timestamps` entirely, so `buildAsrLayer` would
+ * get one word for a whole 25 s chunk. So we run the processor + model ourselves: argmax per frame,
+ * drop the CTC blank (`pad_token_id`) and repeats, then start a new word at each SentencePiece `▁`.
+ * `.to('float32')` is a no-op on the WASM (int8) path and the correct decode on WebGPU's q4f16.
+ *
+ * ponytail: greedy argmax with no CTC emission-lag compensation, so a word's start can read a frame
+ * or two (≤160 ms) late. Fine for playback highlighting and SRT; if it ever isn't, the fix is a
+ * peak-shift per token, not a beam search.
+ */
+async function transcribeCtc(asr: ASR, wave: Float32Array, offsetSeconds: number): Promise<ASRResult> {
+  const { logits } = await asr.model(await asr.processor(wave))
+  const [, frames, vocab] = logits.dims
+  const data = logits.to('float32').data
+  const blank = asr.model.config.pad_token_id ?? vocab - 1
+  const pieces = asr.tokenizer.model.vocab
+  const chunks: ASRChunk[] = []
+  let prev = -1
+  for (let t = 0; t < frames; t++) {
+    const row = t * vocab
+    let best = 0
+    for (let v = 1; v < vocab; v++) if (data[row + v] > data[row + best]) best = v
+    const repeated = best === prev
+    prev = best
+    if (best === blank || best === 0 /* <unk> */ || repeated) continue
+    const piece = pieces[best] ?? ''
+    const start = offsetSeconds + t * CTC_FRAME_SECONDS
+    const last = chunks[chunks.length - 1]
+    if (last && !piece.startsWith('▁')) {
+      last.text += piece
+      last.timestamp[1] = start + CTC_FRAME_SECONDS
+    } else {
+      chunks.push({ text: piece.replace('▁', ''), timestamp: [start, start + CTC_FRAME_SECONDS] })
+    }
+  }
+  const words = chunks.filter((c) => c.text)
+  return { text: words.map((c) => c.text).join(' '), chunks: words, timing: 'word' }
+}
+
+/**
+ * Whisper's language names ("english") are not what `cohere_asr` wants: `CohereAsrProcessor
+ * .get_decoder_prompt_ids` builds a 10-token prompt containing `<|${language}|>`, i.e. an ISO
+ * code. The model has no auto-detect at all, and 'en' is the library's own default, so anything
+ * it doesn't speak (auto / yue / tl) lands there.
+ */
+const COHERE_LANG: Record<string, string> = { english: 'en', chinese: 'zh', japanese: 'ja' }
+
+/**
+ * The VAD's speech regions that overlap one chunk, clipped to it — what the interpolator lays the
+ * words out over, so no manufactured word time lands inside a pause.
+ *
+ * `null` regions (VAD unavailable) or a chunk nothing intersects fall back to the whole span,
+ * which is the pre-VAD behaviour: still monotonic, just blind to the silences inside.
+ */
+function regionsInChunk(
+  all: Region[] | null,
+  startSeconds: number,
+  endSeconds: number,
+): SpeechRegion[] {
+  const whole: SpeechRegion[] = [{ start: startSeconds, end: endSeconds }]
+  if (!all) return whole
+  const inside = all
+    .map((r) => ({ start: Math.max(r.start, startSeconds), end: Math.min(r.end, endSeconds) }))
+    .filter((r) => r.end > r.start)
+  return inside.length ? inside : whole
+}
+
+/**
+ * Timestamp-free models (`cohere_asr`): the pipeline hands back one string and nothing else, so
+ * word times are interpolated across the chunk's speech spans (ADR-0016). No `WhisperTextStreamer`
+ * here, it decodes Whisper timestamp tokens, so live partials are off for these models.
+ *
+ * `speech` is the VAD sweep `transcribe` already ran; the words are spread over the real speech
+ * inside this chunk rather than over its whole span, so pauses stay empty.
+ */
+async function transcribeUntimed(
+  asr: ASR,
+  wave: Float32Array,
+  opts: WorkerTranscribeOpts,
+  offsetSeconds: number,
+  speech: Region[] | null,
+): Promise<ASRResult> {
+  const seconds = wave.length / WHISPER_SAMPLE_RATE
+  const out = (await asr(wave, {
+    // Cohere's card suggests a duration-proportional cap as the anti-hallucination device; a flat
+    // 160 truncates dense Mandarin on a full chunk. `generate`'s own default is max_length 20.
+    max_new_tokens: Math.ceil(seconds * 8) + 16,
+    no_repeat_ngram_size: 3,
+    language: COHERE_LANG[opts.language ?? ''] ?? 'en',
+  })) as ASRResult
+  const text = out.text?.trim() ?? ''
+  const regions = regionsInChunk(speech, offsetSeconds, offsetSeconds + seconds)
+  return { text, chunks: interpolateWords(text, regions), timing: 'interpolated' }
+}
+
 async function transcribeOne(
   asr: ASR,
+  model: CatalogModel,
   wave: Float32Array,
   opts: WorkerTranscribeOpts,
   offsetSeconds: number,
   committedText: string,
   onPartial: (text: string) => void,
+  speech: Region[] | null,
 ): Promise<ASRResult> {
+  // CTC path: no generation at all, so none of the decode knobs below apply — no language/task
+  // (the pipeline only warns, but they mean nothing), no max_new_tokens/no_repeat_ngram_size/
+  // do_sample, and no temperature retry, since a non-autoregressive model has no loop to escape.
+  // There is no token stream either, so the live partial lands once per chunk instead of per token.
+  if (asr.model.config.model_type === 'parakeet_ctc') {
+    const out = await transcribeCtc(asr, wave, offsetSeconds)
+    if (opts.partial) onPartial(normalizePartial(`${committedText} ${out.text}`))
+    return out
+  }
+  if (model.timestamps === 'none') return transcribeUntimed(asr, wave, opts, offsetSeconds, speech)
   // Fresh streamer per attempt, so a failed-then-retried run doesn't double the live partial.
   const run = async (extra: Record<string, unknown>): Promise<ASRResult> => {
     let streamer: WhisperTextStreamer | undefined
@@ -463,7 +627,13 @@ async function transcribeOne(
     ? {}
     : { language: opts.language, task: opts.task ?? 'transcribe' }
 
-  let extra: Record<string, unknown> = { ...multilingual, return_timestamps: 'word' }
+  // An export without cross-attentions can only do chunk timestamps; the catalog says so upfront
+  // rather than paying for the failed word-timestamp attempt first.
+  let degraded = model.timestamps === 'chunk'
+  let extra: Record<string, unknown> = {
+    ...multilingual,
+    return_timestamps: degraded ? true : 'word',
+  }
   let escalated = false
   for (;;) {
     try {
@@ -477,7 +647,7 @@ async function transcribeOne(
         extra = { ...extra, do_sample: true, temperature: 0.4, no_repeat_ngram_size: 2 }
         continue
       }
-      return out
+      return degraded ? { ...out, timing: 'chunk' } : out
     } catch (e) {
       const msg = String((e as Error)?.message ?? e)
       // (1) Model rejects language+task -> drop them and retry (English-only .en builds).
@@ -493,6 +663,7 @@ async function transcribeOne(
       // failing. The catalog turbo uses the *_timestamped export so it never lands here.
       if (/cross attentions|output_attentions/i.test(msg) && extra.return_timestamps === 'word') {
         extra = { ...extra, return_timestamps: true }
+        degraded = true
         continue
       }
       throw e
@@ -507,6 +678,7 @@ interface Sink {
 
 async function transcribe(
   asr: ASR,
+  model: CatalogModel,
   pcm: Int16Array,
   opts: WorkerTranscribeOpts,
   sink: Sink,
@@ -525,7 +697,7 @@ async function transcribe(
   }
 
   if (totalSeconds <= MAX_DIRECT_TRANSCRIBE_SECONDS) {
-    const only = await transcribeOne(asr, toFloat32(pcm), opts, 0, '', sink.partial)
+    const only = await transcribeOne(asr, model, toFloat32(pcm), opts, 0, '', sink.partial, regions)
     sink.progress({
       ratio: 1,
       chunkIndex: 1,
@@ -546,11 +718,13 @@ async function transcribe(
     if (regions || hasDetectableSignalFallback(slice)) {
       const out = await transcribeOne(
         asr,
+        model,
         toFloat32(slice),
         opts,
         startSample / WHISPER_SAMPLE_RATE, // keep timestamps absolute
         results.map((r) => r.text?.trim()).filter(Boolean).join(' '),
         sink.partial,
+        regions,
       )
       results.push(out)
     }
@@ -595,7 +769,10 @@ async function handle(req: Exclude<WorkerRequest, { type: 'dispose' }>): Promise
     const wave = new Float32Array(secs * sr)
     for (let i = 0; i < wave.length; i++) wave[i] = 0.04 * Math.sin(i * 0.06)
     const t0 = performance.now()
-    await engine(wave, { language: 'english', chunk_length_s: 30 })
+    // `cohere_asr` wants an ISO code, not a Whisper language name (see COHERE_LANG): an unknown
+    // `<|lang|>` token would poison the decoder prompt it builds from it.
+    const language = req.model.family === 'cohere-transcribe' ? 'en' : 'english'
+    await engine(wave, { language, chunk_length_s: 30 })
     const el = (performance.now() - t0) / 1000
     post({ id, type: 'done', rtf: el > 0 ? secs / el : 0 })
     return
@@ -610,7 +787,11 @@ async function handle(req: Exclude<WorkerRequest, { type: 'dispose' }>): Promise
   const loaded = await loadEngine(req.model, req.device, onLoad)
   post({ id, type: 'device', device: loaded.device })
   try {
-    post({ id, type: 'done', result: await transcribe(loaded.engine, req.pcm, req.opts, sink) })
+    post({
+      id,
+      type: 'done',
+      result: await transcribe(loaded.engine, req.model, req.pcm, req.opts, sink),
+    })
   } catch (e) {
     if (req.device !== 'webgpu' || req.model.requiresWebGPU || !isWebGpuRuntimeError(e)) throw e
     // A GPU driver hiccup mid-run: drop the session, re-load on WASM and start over. The two
@@ -619,7 +800,11 @@ async function handle(req: Exclude<WorkerRequest, { type: 'dispose' }>): Promise
     post({ id, type: 'device', device: 'wasm' })
     const fallback = await loadEngine(req.model, 'wasm', onLoad)
     post({ id, type: 'device', device: 'wasm' })
-    post({ id, type: 'done', result: await transcribe(fallback.engine, req.pcm, req.opts, sink) })
+    post({
+      id,
+      type: 'done',
+      result: await transcribe(fallback.engine, req.model, req.pcm, req.opts, sink),
+    })
   }
 }
 

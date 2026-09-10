@@ -26,7 +26,7 @@ const REVISION = 'main'
 const PART_BYTES = 8 * 1024 * 1024
 
 /** Verified against DEFAULT_DTYPE_SUFFIX_MAPPING in @huggingface/transformers v4.2.0. */
-const DTYPE_SUFFIX = { fp32: '', fp16: '_fp16', q8: '_quantized', q4: '_q4' } as const
+const DTYPE_SUFFIX = { fp32: '', fp16: '_fp16', q8: '_quantized', q4: '_q4', int8: '_int8', q4f16: '_q4f16' } as const
 type Dtype = keyof typeof DTYPE_SUFFIX
 
 /**
@@ -49,23 +49,36 @@ const CONFIG_FILES = [
   'tokenizer_config.json',
 ]
 
+/** Mirror of `DTYPE_OVERRIDES` in `engine.worker.ts` (the "why" lives there). Cohere Transcribe
+ * has no CPU build at all — `dtypeFor` throws on WASM — so its q4f16 is listed for both devices:
+ * a prefetch that never gets loaded is wasteful, a missing one would be broken. */
+const DTYPE_OVERRIDES: Record<
+  string,
+  Partial<Record<EngineDevice, { encoder: Dtype; decoder: Dtype }>>
+> = {
+  'onnx-community/whisper-small-cantonese-ONNX': { webgpu: { encoder: 'fp16', decoder: 'q4' } },
+  'onnx-community/cohere-transcribe-03-2026-ONNX': {
+    webgpu: { encoder: 'q4f16', decoder: 'q4f16' },
+    wasm: { encoder: 'q4f16', decoder: 'q4f16' },
+  },
+}
+
 /**
  * Mirror of `dtypeFor` in `engine.worker.ts`: that is the SOURCE OF TRUTH and carries the "why"
  * for every choice. It can't be imported here: it lives in a module that pulls in the whole
  * Transformers.js bundle at top level. If the dtype policy changes there, change it here too, or
  * this prefetches files nobody then loads (wasteful, not broken).
  */
-/** Mirror of `DTYPE_OVERRIDES` in `engine.worker.ts` (the "why" lives there). */
-const DTYPE_OVERRIDES: Record<
-  string,
-  Partial<Record<EngineDevice, { encoder: Dtype; decoder: Dtype }>>
-> = {
-  'onnx-community/whisper-small-cantonese-ONNX': { webgpu: { encoder: 'fp16', decoder: 'q4' } },
-}
-
 function dtypesFor(model: CatalogModel, device: EngineDevice): { encoder: Dtype; decoder: Dtype } {
   const override = DTYPE_OVERRIDES[model.hfId]?.[device]
   if (override) return override
+  // Parakeet CTC has no encoder/decoder split: one dtype, reported in both slots so the single
+  // `modelFiles` branch below can read either. int8 is deliberate (the "never an int8 encoder" rule
+  // is Whisper-specific — a CTC model has no autoregressive decoder to amplify the noise).
+  if (model.family === 'parakeet-ctc') {
+    const d: Dtype = device === 'webgpu' ? 'q4f16' : 'int8'
+    return { encoder: d, decoder: d }
+  }
   const large = model.family === 'large-v3-turbo'
   if (device === 'webgpu') {
     return large ? { encoder: 'fp16', decoder: 'q4' } : { encoder: 'fp16', decoder: 'fp16' }
@@ -74,10 +87,17 @@ function dtypesFor(model: CatalogModel, device: EngineDevice): { encoder: Dtype;
 }
 
 /**
- * The repo-relative files the pipeline will ask for. No `.onnx_data` sibling is listed: only
- * `whisper-large-v3-turbo_timestamped`'s *fp32* encoder declares `use_external_data_format`, and
- * no dtype policy above ever picks fp32 for that model. (Verified: every other `*.onnx_data`
- * candidate 404s on the Hub.)
+ * The repo-relative files the pipeline will ask for.
+ *
+ * The Whisper entries list no `.onnx_data` sibling: only `whisper-large-v3-turbo_timestamped`'s
+ * *fp32* encoder declares `use_external_data_format`, and no dtype policy above ever picks fp32
+ * for that model. (Verified: every other `*.onnx_data` candidate 404s on the Hub.)
+ *
+ * Cohere Transcribe is the opposite case: its `transformers.js_config.use_external_data_format`
+ * declares 1 chunk for both `encoder_model_q4f16.onnx` and `decoder_model_merged`, which
+ * `getExternalDataChunkNames` (v4.2.0) turns into a single `<name>.onnx_data` each, fetched
+ * through the same `getModelFile` path we seed. It also needs `processor_config.json`
+ * (`CohereAsrProcessor.uses_processor_config = true`), which no Whisper export has.
  */
 export function modelFiles(
   model: CatalogModel,
@@ -85,12 +105,34 @@ export function modelFiles(
 ): Array<{ hfId: string; file: string }> {
   const { encoder, decoder } = dtypesFor(model, device)
   const own = (file: string) => ({ hfId: model.hfId, file })
-  return [
-    ...CONFIG_FILES.map(own),
-    own(`onnx/encoder_model${DTYPE_SUFFIX[encoder]}.onnx`),
-    own(`onnx/decoder_model_merged${DTYPE_SUFFIX[decoder]}.onnx`),
-    ...VAD_FILES.map((file) => ({ hfId: VAD_HF_ID, file })),
-  ]
+  const enc = `onnx/encoder_model${DTYPE_SUFFIX[encoder]}.onnx`
+  const dec = `onnx/decoder_model_merged${DTYPE_SUFFIX[decoder]}.onnx`
+  const vad = VAD_FILES.map((file) => ({ hfId: VAD_HF_ID, file }))
+  if (model.family === 'parakeet-ctc') {
+    // One `onnx/model_<dtype>.onnx` + its `.onnx_data` sibling (config.json declares
+    // `transformers.js_config.use_external_data_format: true`, which the loader resolves to exactly
+    // one `<file>.onnx_data` chunk). The repo has NO generation_config.json (404), and the tokenizer
+    // loader only ever asks for tokenizer.json + tokenizer_config.json.
+    const onnx = `onnx/model${DTYPE_SUFFIX[encoder]}.onnx`
+    return [
+      ...CONFIG_FILES.filter((f) => f !== 'generation_config.json').map(own),
+      own(onnx),
+      own(`${onnx}_data`),
+      ...vad,
+    ]
+  }
+  if (model.family === 'cohere-transcribe') {
+    return [
+      ...CONFIG_FILES.map(own),
+      own('processor_config.json'),
+      own(enc),
+      own(`${enc}_data`),
+      own(dec),
+      own(`${dec}_data`),
+      ...vad,
+    ]
+  }
+  return [...CONFIG_FILES.map(own), own(enc), own(dec), ...vad]
 }
 
 export function fileUrl(hfId: string, file: string): string {

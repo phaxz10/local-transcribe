@@ -50,11 +50,18 @@ export function buildAsrLayer(out: ASRResult, language = 'auto', offsetSeconds =
     start: r.start + offsetSeconds,
     end: r.end + offsetSeconds,
   }))
-  return { segments, language, task: 'transcribe', ...(speech?.length ? { speech } : {}) }
+  return {
+    segments,
+    language,
+    task: 'transcribe',
+    ...(speech?.length ? { speech } : {}),
+    ...(out.timing ? { timing: out.timing } : {}),
+  }
 }
 
-/** Derive the editable layer 1:1 from the ASR layer (timing = exact). */
+/** Derive the editable layer 1:1 from the ASR layer (timing = exact, unless it was manufactured). */
 export function deriveEditLayer(asr: AsrLayer): EditLayer {
+  const timing = asr.timing === 'interpolated' ? ('interpolated' as const) : ('exact' as const)
   return {
     segments: asr.segments.map((s) => ({
       id: uid('es_'),
@@ -64,7 +71,7 @@ export function deriveEditLayer(asr: AsrLayer): EditLayer {
         origin: [w.id],
         start: w.start,
         end: w.end,
-        timing: 'exact' as const,
+        timing,
       })),
     })),
   }

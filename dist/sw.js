@@ -14,8 +14,8 @@
  * launch actually works.
  */
 
-const PRECACHE = ["/","/index.html","/manifest.webmanifest","/favicon.svg","/assets/archivo-latin-ext-wdth-normal-7khWdh9v.woff2","/assets/archivo-latin-wdth-normal-DY7AcnAa.woff2","/assets/archivo-vietnamese-wdth-normal-rJmnGBSt.woff2","/assets/engine.worker-AVG-H-rI.js","/assets/index-B668nRxz.js","/assets/index-BEAKe-pV.css","/assets/ort-wasm-simd-threaded.asyncify-DMmc6YqF.wasm","/assets/worker-D1KsWRGg.js","/ffmpeg/ffmpeg-core.js","/ffmpeg/ffmpeg-core.wasm","/ffmpeg/ffmpeg-core.worker.js"] || []
-const CACHE = 'lt-shell-' + ("00bb410c97fe" || 'dev')
+const PRECACHE = ["/","/index.html","/manifest.webmanifest","/favicon.svg","/assets/archivo-latin-ext-wdth-normal-7khWdh9v.woff2","/assets/archivo-latin-wdth-normal-DY7AcnAa.woff2","/assets/archivo-vietnamese-wdth-normal-rJmnGBSt.woff2","/assets/engine.worker-B3V9LnLL.js","/assets/index-DFnJSSda.js","/assets/index-DTwexalj.css","/assets/ort-wasm-simd-threaded.asyncify-DMmc6YqF.wasm","/assets/worker-D1KsWRGg.js","/ffmpeg/ffmpeg-core.js","/ffmpeg/ffmpeg-core.wasm","/ffmpeg/ffmpeg-core.worker.js"] || []
+const CACHE = 'lt-shell-' + ("342c43341033" || 'dev')
 /** Content-addressed build output + self-hosted ffmpeg core: immutable, so cache-first. */
 const IMMUTABLE = /^\/(assets|ffmpeg)\//
 

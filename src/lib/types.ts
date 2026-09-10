@@ -25,6 +25,11 @@ const AsrLayer = z.object({
   task: z.enum(['transcribe', 'translate']),
   /** Absolute-second VAD speech regions, when the pass ran. Turn detection prefers these. */
   speech: z.array(z.object({ start: z.number(), end: z.number() })).optional(),
+  /**
+   * How the word times were obtained (ADR-0016). Absent on records written before this existed,
+   * and on the normal Whisper word-timestamp path.
+   */
+  timing: z.enum(['word', 'chunk', 'interpolated']).optional(),
 })
 export type AsrLayer = z.infer<typeof AsrLayer>
 
@@ -85,11 +90,11 @@ export type LangQuality = 0 | 1 | 2 | 3
 export type ModelTask = 'transcription'
 
 export interface CatalogModel {
-  /** Stable catalog id, e.g. "small.en". */
+  /** Stable catalog id, e.g. "parakeet-en". */
   id: string
   label: string
   task: ModelTask
-  family: 'small' | 'large-v3-turbo'
+  family: 'small' | 'parakeet-ctc' | 'cohere-transcribe' | 'large-v3-turbo'
   /** HuggingFace repo id loaded by Transformers.js (ONNX weights). */
   hfId: string
   /** Whether this is the English-only (.en) build. */
@@ -101,6 +106,11 @@ export interface CatalogModel {
   ramCeilingMb: number
   /** Gate to WebGPU devices. On WASM these are impractically slow. */
   requiresWebGPU: boolean
+  /**
+   * Finest timestamp granularity the export can emit. Omitted = `'word'`. `'none'` means the model
+   * returns text only and word times are interpolated across the chunk (ADR-0016).
+   */
+  timestamps?: 'word' | 'chunk' | 'none'
   /** Curated per-language quality used for model recommendation. */
   languages: Record<string, LangQuality>
   /**

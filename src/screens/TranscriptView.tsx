@@ -629,6 +629,13 @@ export function TranscriptView() {
         }
       />
 
+      {/* Manufactured or chunk-level times (ADR-0016): seek still works, it is just not word-exact. */}
+      {(record.asr.timing === 'interpolated' || record.asr.timing === 'chunk') && (
+        <p className="-mt-6 text-xs text-muted-foreground">
+          Word timings are approximate for this model.
+        </p>
+      )}
+
       {/* One bar: playback, edit tools, layer, rerun, export. */}
       <div className="sticky top-14 z-20 -mx-4 space-y-3 border-b bg-background/95 px-4 py-3 backdrop-blur md:-mx-6 md:px-6">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">

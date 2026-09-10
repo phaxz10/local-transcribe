@@ -59,7 +59,7 @@ Design docs: [`CONTEXT.md`](./CONTEXT.md) (glossary) · [`docs/adr/`](./docs/adr
 ## Engine notes / current limits
 
 - Engine: **Transformers.js (ONNX)** on **WebGPU** where available, WASM fallback (ADR-0007).
-- Catalog currently offers `small.en`, multilingual `small`, and **`large-v3-turbo`** (WebGPU-gated). Tiny/base tiers were dropped because they loop on real meeting audio.
+- Catalog currently offers **Parakeet (English)**, multilingual `small`, and **`large-v3-turbo`** (WebGPU-gated). Tiny/base tiers were dropped because they loop on real meeting audio; `small.en` was dropped in 2026-09 because it produced no usable transcript.
 - Per-token **confidence isn't exposed** by this engine, so the low-confidence highlight is inert.
 - The Transcript view **isolates the playback highlight** (memoized segments + a change-only active-word store) so long transcripts stay at full framerate; list windowing is deferred behind a length threshold (ADR-0009). **react-scan** is wired as a dev-only profiler and stripped from the prod bundle.
 - Downloads **can't resume**, the Cache API has no range support, so cancelling Evicts the partial and a retry restarts (ADR-0008).

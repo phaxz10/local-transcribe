@@ -15,5 +15,6 @@ A Transcript keeps the original transcription (Segments → Words with start/end
 - **Confidence survives editing** → we can highlight low-confidence Words to direct the user's attention. Near-free, high-value.
 - Exports take a parameter: **raw (ASR) or corrected (Edit)**, defaulting to corrected.
 - Inserted Words carry interpolated timing explicitly flagged **approximate** — we never fake precision we don't have.
+- The ASR Layer also carries an optional **`timing`** (`'word'` | `'chunk'` | `'interpolated'`) recording how its word times were obtained, so a model that emits no timestamps at all can still populate the layer honestly ([ADR-0016](./0016-timestamp-free-models.md)).
 - Costs a second layer + a mapping to maintain; trivial next to audio/model size, so accepted.
 - Future speaker labels and re-alignment have a stable, immutable base to attach to.
