@@ -13,7 +13,7 @@
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
-    "zustand": "^5.0.14",
+    "@fontsource-variable/archivo": "^5.3.0",
     "@huggingface/transformers": "^4.2.0",
     "@radix-ui/react-dialog": "latest",
     "@radix-ui/react-label": "latest",
@@ -30,18 +30,19 @@
     "lucide-react": "latest",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "tailwind-merge": "latest",
     "zod": "^4.4.3",
-    "tailwind-merge": "latest"
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "vite": "^8.0.16",
     "@tailwindcss/vite": "^4.3.0",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "@vitejs/plugin-react": "latest",
-    "typescript": "latest",
     "react-scan": "^0.5.7",
-    "tailwindcss": "^4.3.0"
+    "tailwindcss": "^4.3.0",
+    "typescript": "latest",
+    "vite": "^8.0.16"
   }
 }

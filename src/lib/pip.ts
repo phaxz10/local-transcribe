@@ -6,6 +6,8 @@
  * only carries the boolean.
  */
 
+import { BRAND } from './brand'
+
 declare global {
   interface Window {
     documentPictureInPicture?: {
@@ -50,7 +52,7 @@ export async function openPipWindow(onClose: () => void): Promise<Window> {
   }
   w.document.documentElement.className = document.documentElement.className
   w.document.body.className = 'bg-background text-foreground'
-  w.document.title = 'Live transcript'
+  w.document.title = `${BRAND.name} live transcript`
 
   w.addEventListener(
     'pagehide',

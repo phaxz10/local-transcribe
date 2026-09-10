@@ -1,8 +1,8 @@
-# Voice AI
+# Scribe by BearLog
 
-*(working name — "VOICE AI" is a placeholder; see **Brand**)* A local-first voice toolkit split by delivery target. **Web Transcribe** is this browser app: audio, video, or microphone input becomes a timestamped, editable Transcript. **Native Translate** is the separate mobile app for spoken travel conversation, with typed text as a fallback.
+A local-first voice toolkit split by delivery target. **Web Transcribe** is this browser app: audio, video, or microphone input becomes a timestamped, editable Transcript. **Native Translate** is the separate mobile app for spoken travel conversation, with typed text as a fallback.
 
-**Brand** *(open)*: "VOICE AI" is deliberately generic — but so generic it is hard to make ownable or searchable. Treat as a placeholder pending a naming pass before launch.
+**Brand**: The app ships as **Scribe by BearLog**, and `docs/brand.md` is the source of truth for the name, the mark, the colours and the type, with `src/lib/brand.ts` holding the one constant every user-visible string reads from.
 
 ## Language
 
@@ -15,7 +15,7 @@ An on-device checkpoint powering exactly one **Task**. In Web Transcribe, Models
 _Avoid_: weights, AI, the network.
 
 **Task**:
-What a Model is responsible for — **Transcription** (speech → text), **Translation** (text → text), or voice synthesis. Web Transcribe's only Catalog Task is Transcription.
+What a Model is responsible for: **Transcription** (speech → text), **Translation** (text → text), or voice synthesis. Web Transcribe's only Catalog Task is Transcription.
 _Avoid_: type, mode, pipeline (that names the engine internal, not the role).
 
 **Provision** (a Model):
@@ -24,14 +24,14 @@ _Avoid_: load, install (those name the mechanics, not the act).
 
 **Download** (a Model):
 Provisioning by picking a Model from the Catalog; the app fetches its checkpoint files and caches them on first use.
-_Avoid_: using "sideload" for this — reserve that for a user-supplied HF id.
+_Avoid_: using "sideload" for this; reserve that for a user-supplied HF id.
 
 **Sideload** (a Model):
 Provisioning by supplying a user-chosen model id or local model package that matches a supported runtime.
 _Avoid_: upload (nothing goes to a server); "BYO file" (it's an id, not a file).
 
 **Evict** (a Model):
-Removing a provisioned Model's weights from the device to free storage — the inverse of Provision. The Model stays in the Catalog and can be Downloaded again; Transcripts and settings are untouched.
+Removing a provisioned Model's weights from the device to free storage, the inverse of Provision. The Model stays in the Catalog and can be Downloaded again; Transcripts and settings are untouched.
 _Avoid_: delete (reserve for Transcripts/data), uninstall, "clear cache" (that names the mechanism, not the act).
 
 **Model Catalog**:
@@ -39,7 +39,7 @@ The curated set of Models the app offers for Download, each tagged with its size
 _Avoid_: model list, model store.
 
 **Recommended Model**:
-The Model the app suggests as the best default *for the current device and Primary Language*, computed from Fit-check + benchmark ×RT + Language Profile — not a fixed pick. The user still chooses.
+The Model the app suggests as the best default *for the current device and Primary Language*, computed from Fit-check + benchmark ×RT + Language Profile, not a fixed pick. The user still chooses.
 _Avoid_: default model.
 
 **Active Model**:
@@ -71,7 +71,7 @@ How many seconds of audio a device transcribes per second of wall-clock with a g
 _Avoid_: speed, throughput.
 
 **Fit-check**:
-The hard pre-Download test that a Model's memory + storage footprint fits the device. The only hard block in the app — failing it would mean a real crash.
+The hard pre-Download test that a Model's memory + storage footprint fits the device. The only hard block in the app, since failing it would mean a real crash.
 _Avoid_: capability check (that's the soft, ETA-based assessment).
 
 **Engine**:
@@ -79,15 +79,15 @@ The warm on-device inference session for an Active Model. Web Transcribe keeps a
 _Avoid_: worker, runner, backend (there is no server backend).
 
 **Transcript**:
-The timestamped, editable text result of transcribing audio. First-class and mutable — users correct it and re-export; edits persist locally.
+The timestamped, editable text result of transcribing audio. First-class and mutable: users correct it and re-export; edits persist locally.
 _Avoid_: output, captions (SRT/VTT are *export formats* of a Transcript, not the Transcript itself).
 
 **Transcription Job**:
-A single file → Transcript run — the upload/batch mode.
+A single file → Transcript run, the upload/batch mode.
 _Avoid_: task, upload.
 
 **Live Session**:
-A microphone → Transcript run that streams interim results in near real-time — the live mode.
+A microphone → Transcript run that streams interim results in near real-time, the live mode.
 _Avoid_: recording, stream.
 
 **Native Translate**:
@@ -132,7 +132,7 @@ The Native Translate input gesture where speech is captured only while the user 
 _Avoid_: push-to-talk (ambiguous), recording mode, VAD.
 
 **Built-in Voice**:
-A text-to-speech voice supplied by the user's own device/OS, used to speak a Translation aloud. The app prefers offline voices so nothing leaves the device. Availability is per-device — notably Cantonese needs a `zh-HK` pack the user installs in OS settings.
+A text-to-speech voice supplied by the user's own device/OS, used to speak a Translation aloud. The app prefers offline voices so nothing leaves the device. Availability is per-device, and notably Cantonese needs a `zh-HK` pack the user installs in OS settings.
 _Avoid_: TTS Model, synth (a Built-in Voice is explicitly *not* a Provisioned Model).
 
 **Voice Model**:
@@ -140,7 +140,7 @@ A Provisioned Model that synthesizes spoken output locally when Built-in Voices 
 _Avoid_: ElevenLabs (that names a cloud product, not this local capability), Built-in Voice.
 
 **Voice Check**:
-The runtime probe of which Built-in Voices the device exposes for the wanted languages — used to confirm spoken output will work and to prompt installing a missing language pack. The speech-side analogue of the Fit-check.
+The runtime probe of which Built-in Voices the device exposes for the wanted languages, used to confirm spoken output will work and to prompt installing a missing language pack. The speech-side analogue of the Fit-check.
 _Avoid_: voice list.
 
 **Segment**:
@@ -148,7 +148,7 @@ A phrase-level unit of a Transcript (~a sentence) with start/end times, containi
 _Avoid_: line, caption, phrase.
 
 **Word**:
-The atomic timestamped unit nested in a Segment — `{ text, start, end, confidence }`. Drives highlight, click-to-seek, and precise editing.
+The atomic timestamped unit nested in a Segment: `{ text, start, end, confidence }`. Drives highlight, click-to-seek, and precise editing.
 _Avoid_: token (a token is a model-internal sub-word fragment; one Word may merge several tokens).
 
 **ASR Layer**:

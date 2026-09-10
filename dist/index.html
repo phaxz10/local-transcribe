@@ -4,11 +4,11 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#fbfaf8" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#110f0c" media="(prefers-color-scheme: dark)" />
-    <meta name="description" content="Private browser transcription for audio and video files." />
+    <meta name="theme-color" content="#f1ede5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#14100c" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Speech becomes notes on your own device. Scribe transcribes audio, video and the microphone entirely in your browser." />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <title>Local Transcribe</title>
+    <title>Scribe by BearLog</title>
     <!-- Set the theme before first paint so there is no flash. `localStorage.theme` is
          'light' | 'dark'; absent means follow the system. See ThemeToggle.tsx. -->
     <script>
@@ -24,11 +24,36 @@
         }
       })()
     </script>
-    <!-- Cross-origin isolation fallback for static hosts without COOP/COEP headers.
-         No-ops in dev (already isolated via Vite headers). -->
-    <script src="/coi-serviceworker.js"></script>
-    <script type="module" crossorigin src="/assets/index-eqtFNnSs.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BhiLdii3.css">
+    <!-- /sw.js does two things: injects COOP/COEP for static hosts that can't set them, and
+         precaches the app shell for offline launch. Production only, since Vite's dev/preview
+         servers already send the isolation headers, so a SW there is pure confusion. -->
+    <script>
+      ;(function () {
+        var host = location.hostname
+        if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]') return
+        if (!navigator.serviceWorker || !window.isSecureContext) return
+        // Already isolated (real server headers, or our SW from a previous load): register to
+        // keep the shell cache fresh, but never reload.
+        var needsReload = window.crossOriginIsolated === false
+        navigator.serviceWorker.register('/sw.js').then(function (reg) {
+          if (!needsReload) return
+          var reload = function () {
+            // Once per tab: if isolation still fails after the SW takes over, don't loop.
+            try {
+              if (sessionStorage.getItem('lt-coi-reload')) return
+              sessionStorage.setItem('lt-coi-reload', '1')
+            } catch (e) {
+              /* private mode: accept the small risk of a second reload */
+            }
+            location.reload()
+          }
+          reg.addEventListener('updatefound', reload)
+          if (reg.active && !navigator.serviceWorker.controller) reload()
+        })
+      })()
+    </script>
+    <script type="module" crossorigin src="/assets/index-D439cWkr.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BEAKe-pV.css">
   </head>
   <body>
     <div id="root"></div>

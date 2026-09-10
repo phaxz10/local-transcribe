@@ -94,7 +94,7 @@ export function FileTranscriber() {
               const el = e.currentTarget
               stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
             }}
-            className="lt-measure max-h-72 overflow-y-auto rounded-lg border bg-card px-5 py-4 text-[15px] leading-[1.8] text-muted-foreground"
+            className="lt-paper lt-measure max-h-72 overflow-y-auto text-[15px] text-muted-foreground"
           >
             {partial}
             <span

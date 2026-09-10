@@ -91,10 +91,10 @@ export function LiveMic() {
         </div>
       </div>
 
-      {/* Paper. */}
+      {/* The paper: ruled, with the accent margin rule. No card, the rules carry it. */}
       <div
         ref={boxRef}
-        className="lt-measure max-h-80 w-full overflow-y-auto whitespace-pre-wrap rounded-lg border bg-card px-5 py-4 text-[16px] leading-[1.8] sm:px-6 sm:py-5"
+        className="lt-paper lt-measure max-h-80 w-full overflow-y-auto whitespace-pre-wrap text-[16px]"
         style={{ minHeight: '11rem' }}
         aria-live="polite"
       >

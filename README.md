@@ -1,4 +1,4 @@
-# Voice AI
+# Scribe by BearLog
 
 Vibe coded AI slop I use personally for:
 
@@ -14,15 +14,16 @@ No uploads, no servers, no accounts. Your audio and transcripts never leave the 
 ## Run
 
 ```bash
-pnpm install      # also copies ffmpeg core + coi-serviceworker into public/
+pnpm install      # also copies the ffmpeg core into public/
 pnpm dev          # http://localhost:5173  (sets COOP/COEP headers for threads)
 pnpm build && pnpm preview   # production build
 ```
 
 > The dev/preview servers set the cross-origin isolation headers required for
 > `SharedArrayBuffer` (multi-threaded WASM). For static hosting, serve with
-> `COOP: same-origin` + `COEP: require-corp`, or rely on the bundled
-> `coi-serviceworker` fallback (already wired in `index.html`).
+> `COOP: same-origin` + `COEP: require-corp`, or rely on `public/sw.js` (registered
+> from `index.html` in production only), which both injects those headers and
+> precaches the built app shell so the app still launches offline.
 
 ## How it works
 

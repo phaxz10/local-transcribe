@@ -95,7 +95,7 @@ function PipPanel() {
       <div
         ref={boxRef}
         style={{ userSelect: 'text' }}
-        className="flex-1 overflow-y-auto rounded-md border bg-card px-3 py-2 text-[13px] leading-[1.7]"
+        className="lt-paper lt-paper-tight flex-1 overflow-y-auto text-[13px]"
       >
         {live?.committedText && <span>{live.committedText} </span>}
         {live?.interimText && (

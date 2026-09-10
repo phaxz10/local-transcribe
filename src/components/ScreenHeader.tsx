@@ -28,7 +28,7 @@ export function ScreenHeader({
         </button>
       )}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <h1 className="min-w-0 break-words text-2xl font-semibold sm:text-[28px]">{title}</h1>
+        <h1 className="lt-display min-w-0 break-words text-2xl sm:text-[28px]">{title}</h1>
         {aside}
       </div>
       {subtitle && (

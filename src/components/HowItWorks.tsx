@@ -20,9 +20,11 @@ export function HowItWorks() {
       <h2 className="lt-eyebrow">How it works</h2>
       <ol className="grid gap-6 sm:grid-cols-3 sm:gap-8">
         {STEPS.map((s, i) => (
-          <li key={s.title} className="space-y-2">
-            <span className="lt-num text-sm text-foreground">{i + 1}</span>
-            <h3 className="text-sm font-medium">{s.title}</h3>
+          <li key={s.title} className="space-y-2 border-t pt-4">
+            <span className="lt-num text-sm text-primary">
+              {String(i + 1).padStart(2, '0')}
+            </span>
+            <h3 className="lt-display text-[15px]">{s.title}</h3>
             <p className="text-sm leading-relaxed text-muted-foreground">{s.body}</p>
           </li>
         ))}

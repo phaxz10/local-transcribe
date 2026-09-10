@@ -1,12 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#46e0d8"/>
-      <stop offset="1" stop-color="#a877ff"/>
-    </linearGradient>
-  </defs>
-  <rect width="32" height="32" rx="8" fill="#0b0e16"/>
-  <g fill="none" stroke="url(#g)" stroke-width="2.4" stroke-linecap="round">
-    <path d="M8 16v0"/><path d="M12 11v10"/><path d="M16 7v18"/><path d="M20 10v12"/><path d="M24 14v4"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#c05b4a"/><circle cx="17" cy="18" r="9" fill="#f1ede5"/><circle cx="47" cy="18" r="9" fill="#f1ede5"/><circle cx="32" cy="34" r="19" fill="#f1ede5"/><circle cx="25" cy="28" r="2.2" fill="#c05b4a"/><circle cx="39" cy="28" r="2.2" fill="#c05b4a"/><g fill="#c05b4a"><rect x="23" y="39" width="3" height="5" rx="1.5"/><rect x="27.5" y="36.5" width="3" height="10" rx="1.5"/><rect x="32" y="34" width="3" height="15" rx="1.5"/><rect x="36.5" y="36.5" width="3" height="10" rx="1.5"/><rect x="41" y="39" width="3" height="5" rx="1.5"/></g></svg>

@@ -4,6 +4,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { useApp, viewFromHash } from '@/lib/store'
 import { TopBar } from '@/components/TopBar'
 import { LivePip } from '@/components/LivePip'
+import { Footer } from '@/components/Support'
 import { Landing } from '@/screens/Landing'
 import { Onboarding } from '@/screens/Onboarding'
 import { Workspace } from '@/screens/Workspace'
@@ -41,7 +42,7 @@ export default function App() {
     <TooltipProvider delayDuration={200}>
       <div className="flex min-h-full flex-col">
         <TopBar />
-        <main className="mx-auto w-full max-w-4xl flex-1 px-4 pb-24 pt-10 md:px-6">
+        <main className="mx-auto w-full max-w-4xl flex-1 px-4 pb-16 pt-10 md:px-6">
           {!ready ? (
             <Booting />
           ) : view === 'landing' ? (
@@ -56,6 +57,7 @@ export default function App() {
             <HistoryView />
           ) : null}
         </main>
+        <Footer />
         <LivePip />
       </div>
     </TooltipProvider>

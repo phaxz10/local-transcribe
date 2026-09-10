@@ -1,18 +1,20 @@
 import { ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { HowItWorks } from '@/components/HowItWorks'
+import { FamilyLine, HeroLockup } from '@/components/Support'
 
 /** Shown wherever the app needs an Active Model and there isn't one yet. */
 export function NoModelState({ onSetup }: { onSetup: () => void }) {
   return (
     <div className="space-y-16 py-6">
       <section className="max-w-2xl space-y-6">
+        <HeroLockup />
         <p className="lt-eyebrow">Runs on this device</p>
-        <h1 className="text-[34px] font-semibold leading-[1.1] sm:text-[44px]">
-          Transcription that never leaves your browser.
+        <h1 className="lt-display text-[34px] leading-[1.1] sm:text-[44px]">
+          Speech becomes notes, on your own machine.
         </h1>
         <p className="max-w-xl text-[17px] leading-relaxed text-muted-foreground">
-          Speak into the microphone or drop in a file. Choose a transcription model to
+          Speak into the microphone or drop in a file. Pick a transcription model to
           start. It downloads once, then works offline.
         </p>
         <div className="pt-2">
@@ -24,6 +26,8 @@ export function NoModelState({ onSetup }: { onSetup: () => void }) {
       </section>
 
       <HowItWorks />
+
+      <FamilyLine />
     </div>
   )
 }

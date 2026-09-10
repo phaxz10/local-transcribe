@@ -1,60 +1,66 @@
 @import "tailwindcss";
+/* The family's display and UI face, self-hosted so an offline launch still has it.
+   `wdth.css` carries the width axis the display style rides at font-stretch: 125%. */
+@import "@fontsource-variable/archivo/wdth.css";
 
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Palette: warm near-white paper / warm near-black ink, one accent (ink green)
- * used only for the record button, the primary action, and the active word.
- * Destructive is reserved for destructive actions.
+ * Scribe by BearLog. The 2026 house palette (docs/brand.md, from bearlog-site):
+ * the dark is the room, the paper is the document. One accent, margin red, spent on
+ * exactly four things: the record button, the primary action, the active word, and the
+ * ruled margin line on the live paper. Everything else is ink on paper.
+ * Focus is honey in both modes, so the ring never reads as the accent.
  * Both modes clear AA for body (foreground) and secondary (muted-foreground) text.
  */
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.986 0.003 85);
-  --foreground: oklch(0.215 0.008 75);
-  --card: oklch(1 0.001 85);
-  --card-foreground: oklch(0.215 0.008 75);
-  --popover: oklch(1 0.001 85);
-  --popover-foreground: oklch(0.215 0.008 75);
-  --primary: oklch(0.44 0.09 158);
-  --primary-foreground: oklch(0.985 0.006 158);
-  --secondary: oklch(0.945 0.005 80);
-  --secondary-foreground: oklch(0.26 0.008 75);
-  --muted: oklch(0.958 0.004 80);
-  --muted-foreground: oklch(0.44 0.012 75);
+  --background: #f1ede5; /* paper */
+  --foreground: #2a2118; /* paper-ink */
+  --card: #f8f5ef;
+  --card-foreground: #2a2118;
+  --popover: #f8f5ef;
+  --popover-foreground: #2a2118;
+  --primary: #c05b4a; /* margin red */
+  --primary-foreground: #f8f5ef;
+  --secondary: #e5dfd2;
+  --secondary-foreground: #2a2118;
+  --muted: #e9e3d8;
+  /* paper-soft (#7d6a4e) is the house token but too light at body size, so this is a step down. */
+  --muted-foreground: #6b5a41;
   /* `accent` is a quiet surface, not a second brand colour, the app has one accent. */
-  --accent: oklch(0.945 0.005 80);
-  --accent-foreground: oklch(0.26 0.008 75);
-  --destructive: oklch(0.5 0.185 27);
-  --destructive-foreground: oklch(0.99 0 0);
+  --accent: #e5dfd2;
+  --accent-foreground: #2a2118;
+  --destructive: #a83a2b;
+  --destructive-foreground: #f8f5ef;
   /* Text-safe red: `--destructive` is tuned as a button fill, this one for words and icons. */
-  --destructive-soft: oklch(0.48 0.185 27);
-  --border: oklch(0.9 0.005 80);
-  --input: oklch(0.88 0.006 80);
-  --ring: oklch(0.44 0.09 158);
+  --destructive-soft: #9c3527;
+  --border: #ddd3c2; /* paper-rule */
+  --input: #d4c8b3;
+  --ring: #e3b04b; /* honey */
 }
 
 .dark {
-  --background: oklch(0.168 0.006 75);
-  --foreground: oklch(0.945 0.004 85);
-  --card: oklch(0.225 0.006 75);
-  --card-foreground: oklch(0.945 0.004 85);
-  --popover: oklch(0.235 0.006 75);
-  --popover-foreground: oklch(0.945 0.004 85);
-  --primary: oklch(0.77 0.13 158);
-  --primary-foreground: oklch(0.19 0.04 158);
-  --secondary: oklch(0.27 0.006 75);
-  --secondary-foreground: oklch(0.945 0.004 85);
-  --muted: oklch(0.245 0.006 75);
-  --muted-foreground: oklch(0.685 0.01 80);
-  --accent: oklch(0.27 0.006 75);
-  --accent-foreground: oklch(0.945 0.004 85);
-  --destructive: oklch(0.505 0.185 27);
-  --destructive-foreground: oklch(0.985 0 0);
-  --destructive-soft: oklch(0.75 0.14 27);
-  --border: oklch(0.3 0.006 75);
-  --input: oklch(0.33 0.006 75);
-  --ring: oklch(0.77 0.13 158);
+  --background: #14100c; /* espresso */
+  --foreground: #f1ede5; /* cream */
+  --card: #1c1712; /* espresso-lift */
+  --card-foreground: #f1ede5;
+  --popover: #221c15;
+  --popover-foreground: #f1ede5;
+  --primary: #e0786a; /* lifted margin red */
+  --primary-foreground: #241610;
+  --secondary: #241d15;
+  --secondary-foreground: #f1ede5;
+  --muted: #201a13;
+  --muted-foreground: #b3a995; /* cream-muted */
+  --accent: #241d15;
+  --accent-foreground: #f1ede5;
+  --destructive: #e0786a;
+  --destructive-foreground: #241610;
+  --destructive-soft: #e0786a;
+  --border: #372c1f; /* hairline */
+  --input: #4a3c2b; /* hairline-soft */
+  --ring: #e3b04b; /* honey */
 }
 
 @theme inline {
@@ -62,10 +68,8 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-    "Liberation Mono", monospace;
+  --font-sans: "Archivo Variable", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -123,14 +127,40 @@
    text-inherit, text-[10px], …) still wins over them. */
 
 @layer components {
-  /* The utility face doing real work: section labels, status, units. */
+  /* The display voice: Archivo pushed wide and heavy, riding the wdth axis. Headings and
+     the wordmark only, never body text. Matches the site's h1/h2 treatment. */
+  .lt-display {
+    font-stretch: 125%;
+    font-weight: 800;
+  }
+
+  /* The utility face doing real work: section labels, status, units. The site's `.kicker`. */
   .lt-eyebrow {
     font-family: var(--font-mono);
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
+    font-weight: 700;
     line-height: 1;
-    letter-spacing: 0.09em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--color-muted-foreground);
+  }
+
+  /* A named text link, ruled underneath rather than coloured: the accent is spent
+     elsewhere. Focus is honey, matching the house `:focus-visible`. */
+  .lt-link {
+    color: var(--color-foreground);
+    text-decoration: underline;
+    text-decoration-color: var(--color-border);
+    text-underline-offset: 4px;
+    border-radius: 2px;
+    transition: text-decoration-color 120ms ease;
+  }
+  .lt-link:hover {
+    text-decoration-color: var(--color-foreground);
+  }
+  .lt-link:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 3px;
   }
 
   .lt-num {
@@ -146,6 +176,62 @@
   .lt-read {
     font-size: 1.0625rem;
     line-height: 1.85;
+  }
+
+  /* ── The paper ────────────────────────────────────────────────────────────
+     The house Notebook look: a rule under every line and one accent margin rule,
+     with the text starting to its right. Two background layers rather than a
+     pseudo-element, because these boxes scroll: `local` glues the rules to the
+     text so they travel with it, `scroll` pins the margin rule to the box so it
+     stays a full-height edge. ponytail: two gradients instead of a ruled sprite.
+
+     Used on the live surfaces only, where words land one line at a time. The
+     Transcript reading surface deliberately stays unruled: its Segments are
+     separate flex rows with their own vertical rhythm and a timestamp gutter, so
+     a fixed 1.85em rule grid cannot line up with the text and reads as noise. */
+  .lt-paper {
+    --lt-rule: 1.85em;
+    --lt-margin: 2.5rem;
+    --lt-pad: 1rem;
+    line-height: 1.85;
+    /* The class owns its own padding so the rule grid can be offset by exactly
+       `--lt-pad` and land under the first line of text. A `py-*` utility at the call
+       site would win and knock the rules half a line out. */
+    padding: var(--lt-pad) 1.25rem var(--lt-pad) calc(var(--lt-margin) + 1rem);
+    background-image:
+      linear-gradient(
+        to right,
+        transparent 0 var(--lt-margin),
+        var(--color-primary) var(--lt-margin) calc(var(--lt-margin) + 1px),
+        transparent calc(var(--lt-margin) + 1px)
+      ),
+      repeating-linear-gradient(
+        to bottom,
+        transparent 0 calc(var(--lt-rule) - 1px),
+        var(--color-border) calc(var(--lt-rule) - 1px) var(--lt-rule)
+      );
+    background-position:
+      0 0,
+      0 var(--lt-pad);
+    background-attachment: scroll, local;
+    background-repeat: repeat-y, repeat;
+  }
+  /* The PiP window is 380px wide: the full margin would eat a third of the line. */
+  .lt-paper-tight {
+    --lt-margin: 1.25rem;
+    --lt-pad: 0.5rem;
+    padding-right: 0.75rem;
+    padding-left: calc(var(--lt-margin) + 0.625rem);
+  }
+
+  /* Transcript Segment row. `content-visibility: auto` skips layout+paint for rows outside
+     the viewport, which is the whole win of windowing without losing Cmd-F / select-all,
+     since the nodes stay in the DOM and stay findable (ADR-0009). `auto 96px` is the placeholder
+     height until a row has been rendered once; after that the browser remembers the real one.
+     ponytail: one CSS rule instead of a virtual list. */
+  .lt-segment {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 96px;
   }
 
   /* ── Live recording ───────────────────────────────────────────────────── */

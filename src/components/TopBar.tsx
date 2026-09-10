@@ -1,11 +1,36 @@
 import type { ReactNode } from 'react'
 import { Mic, History as HistoryIcon, ChevronsUpDown, Coffee } from 'lucide-react'
 import { useApp } from '@/lib/store'
+import { BRAND } from '@/lib/brand'
 import { Button } from '@/components/ui/button'
 import { JobIndicator } from '@/components/JobIndicator'
 import { ThemeToggle } from '@/components/ThemeToggle'
-import { BUYMEACOFFEE_URL } from '@/components/Support'
 import { cn } from '@/lib/utils'
+
+/**
+ * The mark: the bear with a waveform where its mouth would be. Kept identical to
+ * `public/favicon.svg` (docs/brand.md), inlined so it takes the app's own colours at
+ * small sizes rather than loading a second copy of a 600-byte file.
+ */
+export function ScribeMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" aria-hidden="true" className={cn('size-6 shrink-0', className)}>
+      <rect width="64" height="64" rx="14" fill="#c05b4a" />
+      <circle cx="17" cy="18" r="9" fill="#f1ede5" />
+      <circle cx="47" cy="18" r="9" fill="#f1ede5" />
+      <circle cx="32" cy="34" r="19" fill="#f1ede5" />
+      <circle cx="25" cy="28" r="2.2" fill="#c05b4a" />
+      <circle cx="39" cy="28" r="2.2" fill="#c05b4a" />
+      <g fill="#c05b4a">
+        <rect x="23" y="39" width="3" height="5" rx="1.5" />
+        <rect x="27.5" y="36.5" width="3" height="10" rx="1.5" />
+        <rect x="32" y="34" width="3" height="15" rx="1.5" />
+        <rect x="36.5" y="36.5" width="3" height="10" rx="1.5" />
+        <rect x="41" y="39" width="3" height="5" rx="1.5" />
+      </g>
+    </svg>
+  )
+}
 
 export function TopBar() {
   const view = useApp((s) => s.view)
@@ -22,10 +47,8 @@ export function TopBar() {
           className="-ml-1 flex h-10 items-center gap-2 rounded-md px-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
           title="Home"
         >
-          <Mic className="size-4 text-primary" />
-          <span className="text-[15px] font-semibold tracking-tight">
-            LocalTranscribeAI
-          </span>
+          <ScribeMark />
+          <span className="lt-display text-[17px] tracking-tight">{BRAND.name}</span>
         </button>
 
         <div className="ml-auto flex items-center gap-0.5">
@@ -70,7 +93,7 @@ export function TopBar() {
             className="text-muted-foreground hover:text-foreground"
           >
             <a
-              href={BUYMEACOFFEE_URL}
+              href={BRAND.coffee}
               target="_blank"
               rel="noopener noreferrer"
               title="Buy me a coffee"
