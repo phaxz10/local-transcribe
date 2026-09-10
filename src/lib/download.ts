@@ -76,7 +76,7 @@ function dtypesFor(model: CatalogModel, device: EngineDevice): { encoder: Dtype;
   // `modelFiles` branch below can read either. int8 is deliberate (the "never an int8 encoder" rule
   // is Whisper-specific — a CTC model has no autoregressive decoder to amplify the noise).
   if (model.family === 'parakeet-ctc') {
-    const d: Dtype = device === 'webgpu' ? 'q4f16' : 'int8'
+    const d: Dtype = device === 'webgpu' ? 'q4' : 'int8'
     return { encoder: d, decoder: d }
   }
   const large = model.family === 'large-v3-turbo'

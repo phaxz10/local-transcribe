@@ -28,7 +28,7 @@ const ENTRIES: Entry[] = [
   // Non-autoregressive CTC: no decoder, no sampling, no repetition-hallucination by construction.
   // v4.2.0's ASR pipeline routes `parakeet_ctc` down the wav2vec2 branch, which returns text only,
   // so the worker aligns word timestamps from the CTC frames itself (see `transcribeCtc`).
-  { id: 'parakeet-en', label: 'Parakeet (English)', task: 'transcription', family: 'parakeet-ctc', hfId: 'onnx-community/parakeet-ctc-0.6b-ONNX', englishOnly: true, multilingual: false, sizeMb: 455, sizeMbWasm: 612, ramCeilingMb: 1250, requiresWebGPU: false, timestamps: 'word', languages: { en: 3 } },
+  { id: 'parakeet-en', label: 'Parakeet (English)', task: 'transcription', family: 'parakeet-ctc', hfId: 'onnx-community/parakeet-ctc-0.6b-ONNX', englishOnly: true, multilingual: false, sizeMb: 643, sizeMbWasm: 612, ramCeilingMb: 1250, requiresWebGPU: false, timestamps: 'word', languages: { en: 3 } },
   { id: 'small', label: 'Small', task: 'transcription', family: 'small', hfId: 'Xenova/whisper-small', englishOnly: false, multilingual: true, sizeMb: 520, ramCeilingMb: 1200, requiresWebGPU: false, languages: { en: 2, zh: 2, ja: 2, yue: 1, tl: 2 } },
   // We request word-level timestamps (return_timestamps: 'word'), which needs a decoder exported
   // WITH cross-attentions. The canonical `whisper-large-v3-turbo` export lacks them and throws

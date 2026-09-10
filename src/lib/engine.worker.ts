@@ -164,7 +164,7 @@ function dtypeFor(model: CatalogModel, device: EngineDevice): unknown {
   // split, so the dtype is a single string. int8 is safe here: the "never an int8 encoder" rule
   // below is WHISPER-specific (an autoregressive decoder amplifies encoder noise into a repetition
   // loop). A CTC model emits one label per frame and cannot loop, so it takes the small download.
-  if (model.family === 'parakeet-ctc') return device === 'webgpu' ? 'q4f16' : 'int8'
+  if (model.family === 'parakeet-ctc') return device === 'webgpu' ? 'q4' : 'int8'
   const large = model.family === 'large-v3-turbo'
   if (device === 'webgpu') {
     // large-v3-turbo: fp16 encoder + 4-bit decoder. (The onnx-community fp16 *merged decoder* trips
