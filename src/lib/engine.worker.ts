@@ -23,6 +23,8 @@ import type { Region } from './vad-chunks'
 env.allowLocalModels = false
 
 const WHISPER_SAMPLE_RATE = 16000
+/** Languages whose Whisper tokens run 1-3 per character (decode budgets differ). */
+const CJK_LANGS = new Set(['chinese', 'cantonese', 'japanese'])
 const MAX_DIRECT_TRANSCRIBE_SECONDS = 30
 /** Int16 equivalent of the old 0.0008 float peak threshold (0.0008 × 32768). */
 const SIGNAL_THRESHOLD = 26
@@ -567,12 +569,13 @@ async function transcribeUntimed(
   offsetSeconds: number,
   speech: Region[] | null,
 ): Promise<ASRResult> {
+  const cjkUntimed = CJK_LANGS.has(String(opts.language ?? ''))
   const seconds = wave.length / WHISPER_SAMPLE_RATE
   const out = (await asr(wave, {
     // Cohere's card suggests a duration-proportional cap as the anti-hallucination device; a flat
     // 160 truncates dense Mandarin on a full chunk. `generate`'s own default is max_length 20.
-    max_new_tokens: Math.ceil(seconds * 8) + 16,
-    no_repeat_ngram_size: 3,
+    max_new_tokens: Math.min(440, Math.ceil(seconds * (cjkUntimed ? 14 : 8)) + 24),
+    no_repeat_ngram_size: cjkUntimed ? 5 : 3,
     language: COHERE_LANG[opts.language ?? ''] ?? 'en',
   })) as ASRResult
   const text = out.text?.trim() ?? ''
@@ -601,6 +604,7 @@ async function transcribeOne(
   }
   if (model.timestamps === 'none') return transcribeUntimed(asr, wave, opts, offsetSeconds, speech)
   // Fresh streamer per attempt, so a failed-then-retried run doesn't double the live partial.
+  const cjk = CJK_LANGS.has(String(opts.language ?? ''))
   const run = async (extra: Record<string, unknown>): Promise<ASRResult> => {
     let streamer: WhisperTextStreamer | undefined
     if (opts.partial) {
@@ -612,14 +616,19 @@ async function transcribeOne(
         },
       })
     }
+    // CJK languages spend 1-3 Whisper tokens per character, so a full 25 s chunk of Mandarin
+    // overran the old flat budget of 160 and lost its tail; and a 3-gram block forbids ordinary
+    // repeated phrases in Chinese/Japanese. Budget scales with audio, the block loosens for CJK.
+    const seconds = wave.length / WHISPER_SAMPLE_RATE
     const params: Record<string, unknown> = {
       force_full_sequences: false,
-      max_new_tokens: 160,
+      max_new_tokens: Math.min(440, Math.ceil(seconds * (cjk ? 14 : 8)) + 24),
       // Hard loop-breaker: forbid any 3-gram from repeating, which is what kills Whisper's
       // "I'm I'm so so so" repetition-hallucination. This is the decode safety-net the installed
       // transformers.js (v4.2.0) actually supports, the Python thresholds (compression_ratio /
       // logprob / no_speech) are NOT implemented in this build, so passing them would be ignored.
-      no_repeat_ngram_size: 3,
+      // CJK: 5-gram, so legitimate phrase repeats survive while a degenerate loop still trips it.
+      no_repeat_ngram_size: cjk ? 5 : 3,
       ...(streamer ? { streamer } : {}),
       ...extra,
     }
@@ -649,7 +658,7 @@ async function transcribeOne(
       // fallback, by hand. The fresh-streamer-per-attempt design means the retry re-streams cleanly.
       if (!escalated && looksDegenerate(out.text)) {
         escalated = true
-        extra = { ...extra, do_sample: true, temperature: 0.4, no_repeat_ngram_size: 2 }
+        extra = { ...extra, do_sample: true, temperature: 0.4, no_repeat_ngram_size: cjk ? 3 : 2 }
         continue
       }
       return degraded ? { ...out, timing: 'chunk' } : out
