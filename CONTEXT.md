@@ -54,6 +54,10 @@ _Avoid_: language list, locale support.
 The language the user declares at onboarding, used to steer the Recommended Model (e.g. English → an `.en` Model).
 _Avoid_: locale, default language.
 
+**Session Language**:
+The per-session language override on the Transcribe screen. It replaces the Primary Language for the runs started from that screen without changing the global setting, and it is the *source* language even when Translate to English is on.
+_Avoid_: temporary language, target language (it names the speech, not the output); overriding the Primary Language (it never writes to it).
+
 **Travel Language Pair**:
 A bidirectional language pair Native Translate is expected to handle well for short travel conversations. English ↔ Cantonese is the first priority, followed by Mandarin, Japanese, Korean, Thai, Malay, and Tagalog.
 _Avoid_: benchmark language, supported locale.

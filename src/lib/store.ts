@@ -11,7 +11,7 @@ import type {
   TranscriptRecord,
 } from './types'
 import { detectCapability, estimateEta, fitCheck } from './capability'
-import { RETIRED, buildCatalog, recommendModel } from './catalog'
+import { RETIRED, asrTask, buildCatalog, recommendModel } from './catalog'
 import {
   deleteRecordingChunks,
   deleteTranscript,
@@ -226,7 +226,8 @@ function peakOf(pcm: Int16Array): number {
  * behind the speaker but the per-tick cost stays bounded.
  */
 async function tickBody(final: boolean): Promise<void> {
-  const { activeModel, primaryLanguage, capability, live } = useApp.getState()
+  const { activeModel, primaryLanguage, sessionLanguage, translate, capability, live } =
+    useApp.getState()
   if (!live || !activeModel) return
   const from = committedSamples
   const to = totalSamples
@@ -238,9 +239,16 @@ async function tickBody(final: boolean): Promise<void> {
     setLive({ interimText: '' })
     return
   }
-  const language = languageName(primaryLanguage, activeModel.englishOnly, activeModel.forceLanguage)
+  // Whisper convention: `language` stays the SOURCE language even when translating to English.
+  const language = languageName(
+    sessionLanguage ?? primaryLanguage,
+    activeModel.englishOnly,
+    activeModel.forceLanguage,
+  )
+  const task = asrTask(activeModel, translate)
   const out = await transcribeWithEngine(activeModel, capability?.device ?? 'wasm', tail, {
     language,
+    task,
     englishOnly: activeModel.englishOnly,
   })
   const text = (out.text ?? '').replace(/\s+/g, ' ').trim()
@@ -248,7 +256,7 @@ async function tickBody(final: boolean): Promise<void> {
     setLive({ interimText: text })
     return
   }
-  liveSegments.push(...buildAsrLayer(out, language ?? 'auto', from / SR).segments)
+  liveSegments.push(...buildAsrLayer(out, language ?? 'auto', from / SR, task).segments)
   committedSamples = to
   setLive((l) => ({
     committedText: [l.committedText, text].filter(Boolean).join(' '),
@@ -358,6 +366,10 @@ interface AppState {
   /** Catalog ids whose weights are present in Cache Storage, reconciled on init. */
   provisioned: string[]
   primaryLanguage: PrimaryLanguage
+  /** Session Language: the Transcribe screen's override, null = follow `primaryLanguage`. */
+  sessionLanguage: PrimaryLanguage | null
+  /** Run the Whisper `translate` task (foreign speech → English text) instead of `transcribe`. */
+  translate: boolean
   /** The provisioned, active Transcription Model (downloaded + selected). */
   activeModel: CatalogModel | null
   record: TranscriptRecord | null
@@ -382,6 +394,8 @@ interface AppState {
   init: () => Promise<void>
   setView: (v: View) => void
   setPrimaryLanguage: (l: PrimaryLanguage) => void
+  setSessionLanguage: (l: PrimaryLanguage | null) => void
+  setTranslate: (t: boolean) => void
   setActiveModel: (m: CatalogModel) => void
   /** Record that a model's weights are now cached (after a successful Download). */
   markProvisioned: (id: string) => void
@@ -443,6 +457,8 @@ export const useApp = create<AppState>((set, get) => ({
   catalog: [],
   provisioned: [],
   primaryLanguage: 'en',
+  sessionLanguage: null,
+  translate: false,
   activeModel: null,
   record: null,
   mediaUrl: null,
@@ -463,6 +479,9 @@ export const useApp = create<AppState>((set, get) => ({
     ])
     const catalog = buildCatalog()
     const savedLang = (await getSetting<PrimaryLanguage>('primaryLanguage').catch(() => undefined)) ?? 'en'
+    const savedSessionLang =
+      (await getSetting<PrimaryLanguage | null>('sessionLanguage').catch(() => undefined)) ?? null
+    const savedTranslate = (await getSetting<boolean>('translate').catch(() => undefined)) ?? false
     const savedModelId = await getSetting<string>('activeModelId').catch(() => undefined)
     const savedRtf = await getSetting<number>('benchmarkRtf').catch(() => undefined)
 
@@ -495,6 +514,8 @@ export const useApp = create<AppState>((set, get) => ({
       history,
       provisioned: provisioned.filter((id) => !(id in RETIRED)),
       primaryLanguage: savedLang,
+      sessionLanguage: savedSessionLang,
+      translate: savedTranslate,
       activeModel,
       ready: true,
       view: initialView,
@@ -518,6 +539,14 @@ export const useApp = create<AppState>((set, get) => ({
   setPrimaryLanguage: (l) => {
     void setSetting('primaryLanguage', l)
     set({ primaryLanguage: l })
+  },
+  setSessionLanguage: (l) => {
+    void setSetting('sessionLanguage', l)
+    set({ sessionLanguage: l })
+  },
+  setTranslate: (t) => {
+    void setSetting('translate', t)
+    set({ translate: t })
   },
   setActiveModel: (m) => {
     void setSetting('activeModelId', m.id)
@@ -609,7 +638,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   runFileJob: async (file) => {
-    const { activeModel, primaryLanguage, capability, job, live } = get()
+    const { activeModel, primaryLanguage, sessionLanguage, translate, capability, job, live } = get()
     if (!activeModel || activeModel.task !== 'transcription' || job) return // single-job invariant: one shared engine at a time
     if (live?.status === 'recording' || live?.status === 'transcribing') return // a file job would starve the interim ticks
     const patch = (p: Partial<ActiveJob>) =>
@@ -631,10 +660,13 @@ export const useApp = create<AppState>((set, get) => ({
         ac.signal,
       )
       patch({ phase: 'loading', pct: 0, etaSec: estimateEta(durationSec, capability?.benchmarkRtf ?? null) })
-      const language = languageName(primaryLanguage, activeModel.englishOnly, activeModel.forceLanguage)
+      // Whisper convention: `language` stays the SOURCE language even when translating to English.
+      const language = languageName(sessionLanguage ?? primaryLanguage, activeModel.englishOnly, activeModel.forceLanguage)
+      const task = asrTask(activeModel, translate)
       const out = await transcribeWithEngine(activeModel, device, pcm, {
         signal: ac.signal,
         language,
+        task,
         englishOnly: activeModel.englishOnly,
         onLoadProgress: (s) => patch({ pct: Math.round(s.ratio * 100) }),
         onDeviceReady: (d) => patch({ device: d, phase: 'transcribing', pct: 0 }),
@@ -642,7 +674,7 @@ export const useApp = create<AppState>((set, get) => ({
         onProgress: (s) => patch({ pct: Math.round(s.ratio * 100) }),
         onPartial: (t) => patch({ partial: t }),
       })
-      const asrLayer = buildAsrLayer(out, language ?? 'auto')
+      const asrLayer = buildAsrLayer(out, language ?? 'auto', 0, task)
       const now = Date.now()
       const mediaId = uid('media_')
       const record: TranscriptRecord = {
@@ -702,7 +734,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   runRerunJob: async () => {
-    const { record, activeModel, primaryLanguage, capability, job, live } = get()
+    const { record, activeModel, primaryLanguage, sessionLanguage, translate, capability, job, live } = get()
     if (!record || !activeModel || activeModel.task !== 'transcription' || job) return
     if (live?.status === 'recording' || live?.status === 'transcribing') return
     const patch = (p: Partial<ActiveJob>) =>
@@ -736,10 +768,13 @@ export const useApp = create<AppState>((set, get) => ({
         ac.signal,
       )
       patch({ phase: 'loading', pct: 0, etaSec: estimateEta(durationSec, capability?.benchmarkRtf ?? null) })
-      const language = languageName(primaryLanguage, activeModel.englishOnly, activeModel.forceLanguage)
+      // Whisper convention: `language` stays the SOURCE language even when translating to English.
+      const language = languageName(sessionLanguage ?? primaryLanguage, activeModel.englishOnly, activeModel.forceLanguage)
+      const task = asrTask(activeModel, translate)
       const out = await transcribeWithEngine(activeModel, device, pcm, {
         signal: ac.signal,
         language,
+        task,
         englishOnly: activeModel.englishOnly,
         onLoadProgress: (s) => patch({ pct: Math.round(s.ratio * 100) }),
         onDeviceReady: (d) => patch({ device: d, phase: 'transcribing', pct: 0 }),
@@ -747,7 +782,7 @@ export const useApp = create<AppState>((set, get) => ({
         onProgress: (s) => patch({ pct: Math.round(s.ratio * 100) }),
         onPartial: (t) => patch({ partial: t }),
       })
-      const asrLayer = buildAsrLayer(out, language ?? 'auto')
+      const asrLayer = buildAsrLayer(out, language ?? 'auto', 0, task)
       const now = Date.now()
       const next: TranscriptRecord = {
         id: uid('tr_'),
@@ -1006,11 +1041,11 @@ export const useApp = create<AppState>((set, get) => ({
       error = e instanceof Error ? e.message : String(e)
     }
 
-    const { activeModel, primaryLanguage } = get()
+    const { activeModel, primaryLanguage, sessionLanguage, translate } = get()
     const asr: AsrLayer = {
       segments: liveSegments.slice(),
-      language: existing?.asr.language ?? languageName(primaryLanguage, activeModel?.englishOnly ?? false, activeModel?.forceLanguage) ?? 'auto',
-      task: 'transcribe',
+      language: existing?.asr.language ?? languageName(sessionLanguage ?? primaryLanguage, activeModel?.englishOnly ?? false, activeModel?.forceLanguage) ?? 'auto',
+      task: existing?.asr.task ?? (activeModel ? asrTask(activeModel, translate) : 'transcribe'),
     }
     const durationSec = totalSamples / SR
     const source = {

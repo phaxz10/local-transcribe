@@ -57,6 +57,20 @@ export function buildCatalog(): CatalogModel[] {
   return ENTRIES.map((e) => ({ ...e, available: true }))
 }
 
+/**
+ * Whether `task: 'translate'` (foreign speech → English text) is available. It is a Whisper decoder
+ * feature: Parakeet CTC has no decoder at all and Cohere Transcribe has no translate mode, and a
+ * single-language fine-tune (`small-yue`, multilingual: false) was never trained for it.
+ */
+export function canTranslate(m: CatalogModel): boolean {
+  return m.multilingual && !m.englishOnly && (m.family === 'small' || m.family === 'large-v3-turbo')
+}
+
+/** The ASR task to run: `translate` only when the user asked AND the model can. */
+export function asrTask(m: CatalogModel, translate: boolean): 'transcribe' | 'translate' {
+  return translate && canTranslate(m) ? 'translate' : 'transcribe'
+}
+
 function familyRank(m: CatalogModel): number {
   return FAMILY_ORDER.indexOf(m.family)
 }

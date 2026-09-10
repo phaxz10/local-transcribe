@@ -650,6 +650,7 @@ export function TranscriptView() {
         subtitle={
           <span className="lt-eyebrow">
             {record.model} · {record.asr.language} ·{' '}
+            {record.asr.task === 'translate' && <>Translated to English · </>}
             {formatTime(record.source.durationSec)}
           </span>
         }

@@ -5,7 +5,12 @@ import { uid } from './utils'
 const SENTENCE_END = /[.!?。！？…]["'”’)\]]?$/
 
 /** Build the immutable ASR layer from a Transformers.js word-timestamp result (ADR-0005). */
-export function buildAsrLayer(out: ASRResult, language = 'auto', offsetSeconds = 0): AsrLayer {
+export function buildAsrLayer(
+  out: ASRResult,
+  language = 'auto',
+  offsetSeconds = 0,
+  task: AsrLayer['task'] = 'transcribe',
+): AsrLayer {
   const words: AsrWord[] = []
   let prevEnd = 0
   for (const c of out.chunks ?? []) {
@@ -53,7 +58,7 @@ export function buildAsrLayer(out: ASRResult, language = 'auto', offsetSeconds =
   return {
     segments,
     language,
-    task: 'transcribe',
+    task,
     ...(speech?.length ? { speech } : {}),
     ...(out.timing ? { timing: out.timing } : {}),
   }
