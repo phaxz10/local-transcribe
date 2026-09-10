@@ -1,6 +1,6 @@
 import { HowItWorks } from '@/components/HowItWorks'
 import { NoModelState } from '@/components/NoModelState'
-import { FamilyLine, HeroLockup } from '@/components/Support'
+import { FamilyLine } from '@/components/Support'
 import { Button } from '@/components/ui/button'
 import { useApp } from '@/lib/store'
 import { ArrowRight } from 'lucide-react'
@@ -16,7 +16,6 @@ export function Landing() {
   return (
     <div className="space-y-16 py-6">
       <section className="max-w-2xl space-y-6">
-        <HeroLockup />
         <h1 className="lt-display text-[34px] leading-[1.1] sm:text-[44px]">
           Speech becomes notes, on your own machine.
         </h1>
