@@ -42,7 +42,7 @@ Local-first, in-browser speech-to-text. All transcription runs on the user's dev
 
 ## Catalog spec
 
-`parakeet-en` · multilingual `small` · `large-v3-turbo` (ONNX, loaded by HF id; WebGPU-gated for turbo). Tiny/base tiers were dropped after real meeting audio exposed repetition loops; `small.en` was dropped in 2026-09 for producing no usable transcript, and English is now Parakeet CTC, which cannot loop by construction. Quantization is per-device (`fp16`/`q4` on WebGPU, `q8` on WASM; Parakeet is a single-file export at `q4f16`/`int8`). Each entry: `{ id, hfId, label, sizeMb, ramCeilingMb, requiresWebGPU, multilingual, languages: {en,zh,ja,yue,tl,…quality} }`. Recommended = best that passes Fit-check ∧ WebGPU-gate ∧ Primary Language.
+`parakeet-en` (`onnx-community/parakeet-ctc-0.6b-ONNX`, English, CTC so it cannot loop) · multilingual `small` · `small-yue` (`onnx-community/whisper-small-cantonese-ONNX`, `yue: 3`, `forceLanguage: 'chinese'`, the Cantonese pick since turbo is rated `yue: 0`) · `cohere-transcribe` (WebGPU, no word timings, manual pick) · `large-v3-turbo` (WebGPU-gated). Tiny/base tiers were dropped after real meeting audio exposed repetition loops; `small.en` was dropped in 2026-09 for producing no usable transcript. Quantization is per-device (`fp16`/`q4` on WebGPU, `q8` on WASM; Parakeet is a single-file export at `q4f16`/`int8`), with per-hfId overrides. Each entry: `{ id, hfId, label, sizeMb, ramCeilingMb, requiresWebGPU, multilingual, forceLanguage?, timestamps?, languages: {en,zh,ja,yue,tl,…quality} }`. Recommended = best that passes Fit-check ∧ WebGPU-gate ∧ Primary Language (a language with a rating-3 model in reach raises the quality floor to 2).
 
 ## Acceptance criteria
 

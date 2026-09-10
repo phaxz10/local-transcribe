@@ -7,15 +7,23 @@
  * this worker over the tiny request/event protocol below. Cancel is a `terminate()` from the page,
  * so nothing in here needs an AbortSignal.
  */
-import { pipeline, env, WhisperTextStreamer } from '@huggingface/transformers'
+import { AutoModel, Tensor, pipeline, env, WhisperTextStreamer } from '@huggingface/transformers'
 import type { CatalogModel, EngineDevice } from './types'
+import { interpolateWords, type SpeechRegion } from './interpolate-times'
+import {
+  MAX_CHUNK_SECONDS,
+  VAD_WINDOW_SAMPLES,
+  gridChunks,
+  packChunks,
+  regionsFromProbs,
+} from './vad-chunks'
+import type { Region } from './vad-chunks'
 
 // Remote HF models only; Transformers.js caches weights in Cache Storage.
 env.allowLocalModels = false
 
 const WHISPER_SAMPLE_RATE = 16000
 const MAX_DIRECT_TRANSCRIBE_SECONDS = 30
-const MANUAL_CHUNK_SECONDS = 25
 /** Int16 equivalent of the old 0.0008 float peak threshold (0.0008 × 32768). */
 const SIGNAL_THRESHOLD = 26
 
@@ -28,6 +36,17 @@ export interface ASRChunk {
 export interface ASRResult {
   text: string
   chunks?: ASRChunk[]
+  /**
+   * Absolute-second speech regions from the VAD pass. Carried on the result so a later
+   * diarization pass can reuse them instead of re-running the VAD. Absent when the VAD
+   * was unavailable and the peak-based fallback ran.
+   */
+  speech?: Region[]
+  /**
+   * Where the word times in `chunks` came from. Absent = 'word' (the normal Whisper case).
+   * 'chunk' = the cross-attention degrade below; 'interpolated' = manufactured (ADR-0016).
+   */
+  timing?: 'word' | 'chunk' | 'interpolated'
 }
 
 export interface LoadStatus {
@@ -100,7 +119,41 @@ type ASR = Awaited<ReturnType<typeof pipeline>> & {
   dispose?: () => Promise<void>
 }
 
+/** "No build for this device at all" — `dtypeFor` turns it into a readable error. */
+const UNSUPPORTED = Symbol('unsupported')
+
+/**
+ * Per-model dtype escapes, keyed by hfId. MIRRORED in `download.ts#DTYPE_OVERRIDES`, keep in step.
+ *
+ * `whisper-small-cantonese-ONNX`: the family default on WebGPU is uniform fp16, but this repo's
+ * fp16 merged decoder is 308 MB against 233 MB for q4, and q4 is what the sibling large-v3-turbo
+ * export proved loads cleanly through onnxruntime-web's graph validator. Its q4f16 encoder (54 MB)
+ * is tempting and rejected: 4-bit is *below* the int8 encoder the family rule already forbids.
+ * WASM is left to the family default (fp32 encoder + q8 decoder), which is already right.
+ *
+ * `cohere-transcribe-03-2026-ONNX`: 2B params, >90% of them in the Conformer encoder. q4f16
+ * (1.44 GB encoder + 98 MB decoder) is the only variant in the GPU budget, and the repo's own
+ * `transformers.js_config` pins the kv-cache to float16 for exactly that dtype. It ships no CPU
+ * build at all, hence UNSUPPORTED on WASM: the catalog entry is `requiresWebGPU`, so that only
+ * fires if something forces the fallback, and a clear error beats Whisper dtype names on a
+ * non-Whisper graph.
+ */
+const DTYPE_OVERRIDES: Record<string, Partial<Record<EngineDevice, unknown>>> = {
+  'onnx-community/whisper-small-cantonese-ONNX': {
+    webgpu: { encoder_model: 'fp16', decoder_model_merged: 'q4' },
+  },
+  'onnx-community/cohere-transcribe-03-2026-ONNX': {
+    webgpu: 'q4f16',
+    wasm: UNSUPPORTED,
+  },
+}
+
 function dtypeFor(model: CatalogModel, device: EngineDevice): unknown {
+  const override = DTYPE_OVERRIDES[model.hfId]?.[device]
+  if (override === UNSUPPORTED) {
+    throw new Error(`${model.label} needs WebGPU and has no CPU build; pick another model.`)
+  }
+  if (override) return override
   // Parakeet CTC ships ONE `onnx/model_<dtype>.onnx` (+ external `.onnx_data`), no encoder/decoder
   // split, so the dtype is a single string. int8 is safe here: the "never an int8 encoder" rule
   // below is WHISPER-specific (an autoregressive decoder amplifies encoder noise into a repetition
@@ -269,28 +322,88 @@ async function loadEngine(
 
 /* ── Transcription ────────────────────────────────────────────────────────── */
 
-interface PlannedChunk {
-  index: number
-  startSample: number
-  endSample: number
-  startSeconds: number
-  endSeconds: number
+/* ── Voice activity detection ─────────────────────────────────────────────── */
+
+const VAD_HF_ID = 'onnx-community/silero-vad'
+/** Silero's recurrent state: [2 LSTM layers, batch 1, 128 hidden]. */
+const VAD_STATE_DIMS = [2, 1, 128]
+
+/** The raw ONNX graph: inputs `input`/`sr`/`state`, outputs `output`/`stateN`. */
+type VadSession = (i: Record<string, unknown>) => Promise<{ output: Tensor; stateN: Tensor }>
+
+let vadSession: Promise<VadSession> | null = null
+let vadFailed = false
+
+/**
+ * `onnx-community/silero-vad` ships `onnx/model.onnx` and *no config.json* (it 404s), so there is
+ * no pipeline and no model class to dispatch on. `config: { model_type: 'custom' }` is
+ * transformers.js's documented escape hatch: passing a config skips the config.json fetch, and an
+ * unmapped model_type falls through to the default single-session path, whose forward is a plain
+ * `sessionRun` returning the graph's own output names.
+ *
+ * Always WASM, even when the ASR pipeline is on WebGPU: this is a 2.2 MB LSTM invoked once per
+ * 32 ms of audio, so GPU dispatch overhead would dominate the arithmetic several times over.
+ * onnxruntime-web keeps an execution provider per InferenceSession, so the two coexist in one
+ * worker. fp32 rather than the 0.6 MB int8: quantizing an LSTM's recurrent path for 1.6 MB of
+ * download is a bad trade against a 500 MB model.
+ */
+function loadVad(): Promise<VadSession> {
+  vadSession ??= AutoModel.from_pretrained(VAD_HF_ID, {
+    config: { model_type: 'custom' } as never,
+    dtype: 'fp32',
+    device: 'wasm',
+  }) as unknown as Promise<VadSession>
+  return vadSession
 }
 
-function plannedChunks(sampleCount: number): PlannedChunk[] {
-  const samplesPerChunk = MANUAL_CHUNK_SECONDS * WHISPER_SAMPLE_RATE
-  const chunks: PlannedChunk[] = []
-  for (let startSample = 0; startSample < sampleCount; startSample += samplesPerChunk) {
-    const endSample = Math.min(startSample + samplesPerChunk, sampleCount)
-    chunks.push({
-      index: chunks.length,
-      startSample,
-      endSample,
-      startSeconds: startSample / WHISPER_SAMPLE_RATE,
-      endSeconds: endSample / WHISPER_SAMPLE_RATE,
-    })
+/**
+ * Speech regions in seconds, or `null` if the VAD could not run (never cached and now offline, or
+ * an ORT error) — callers then fall back to the peak gate. The 512-sample windows must run
+ * sequentially because the LSTM state carries between them.
+ *
+ * ponytail ceiling: that is ~31 session runs per second of audio (~112k for a one-hour file, ~780
+ * for a full live tail). Still a rounding error next to a Whisper decode, but it is why this runs
+ * once per request over the whole buffer rather than per chunk.
+ */
+async function speechRegions(pcm: Int16Array): Promise<Region[] | null> {
+  if (vadFailed) return null
+  let vad: VadSession
+  try {
+    vad = await loadVad()
+  } catch (e) {
+    vadFailed = true
+    vadSession = null
+    console.warn('[vad] unavailable, falling back to the peak gate:', e)
+    return null
   }
-  return chunks
+
+  const windowCount = Math.floor(pcm.length / VAD_WINDOW_SAMPLES)
+  const probs = new Float32Array(windowCount)
+  const sr = new Tensor('int64', [BigInt(WHISPER_SAMPLE_RATE)], [])
+  let state = new Tensor('float32', new Float32Array(2 * 1 * 128), VAD_STATE_DIMS)
+  try {
+    for (let w = 0; w < windowCount; w++) {
+      const offset = w * VAD_WINDOW_SAMPLES
+      const frame = new Float32Array(VAD_WINDOW_SAMPLES)
+      for (let j = 0; j < VAD_WINDOW_SAMPLES; j++) frame[j] = pcm[offset + j] / 32768
+      const out = await vad({
+        input: new Tensor('float32', frame, [1, VAD_WINDOW_SAMPLES]),
+        sr,
+        state,
+      })
+      state = out.stateN
+      probs[w] = Number(out.output.data[0])
+    }
+  } catch (e) {
+    vadFailed = true
+    console.warn('[vad] run failed, falling back to the peak gate:', e)
+    return null
+  }
+  return regionsFromProbs(
+    probs,
+    VAD_WINDOW_SAMPLES / WHISPER_SAMPLE_RATE,
+    pcm.length / WHISPER_SAMPLE_RATE,
+  )
 }
 
 /** Int16 → Float32, made per-chunk right before inference so peak memory stays ~2 bytes/sample. */
@@ -313,10 +426,21 @@ function offsetResult(out: ASRResult, offsetSeconds: number): ASRResult {
   }
 }
 
+/** Worst granularity wins: one interpolated chunk makes the whole transcript approximate. */
+function mergeTiming(results: ASRResult[]): ASRResult['timing'] {
+  if (results.some((r) => r.timing === 'interpolated')) return 'interpolated'
+  if (results.some((r) => r.timing === 'chunk')) return 'chunk'
+  return undefined
+}
+
 function mergeResults(results: ASRResult[]): ASRResult {
+  const speech = results.flatMap((r) => r.speech ?? [])
+  const timing = mergeTiming(results)
   return {
     text: results.map((r) => r.text?.trim()).filter(Boolean).join(' '),
     chunks: results.flatMap((r) => r.chunks ?? []),
+    ...(speech.length ? { speech } : {}),
+    ...(timing ? { timing } : {}),
   }
 }
 
@@ -336,7 +460,9 @@ function looksDegenerate(text: string): boolean {
   return new Set(toks).size / toks.length < 0.35
 }
 
-function hasDetectableSignal(pcm: Int16Array): boolean {
+/** Fallback silence gate, used only when the VAD could not load. A raw peak threshold: it passes
+ * room tone and HVAC straight into Whisper, which is exactly why the VAD replaced it. */
+function hasDetectableSignalFallback(pcm: Int16Array): boolean {
   let peak = 0
   for (let i = 0; i < pcm.length; i += 16) {
     peak = Math.max(peak, Math.abs(pcm[i]))
@@ -346,7 +472,7 @@ function hasDetectableSignal(pcm: Int16Array): boolean {
 }
 
 /**
- * One encoder frame = 10 ms mel hop (`hop_length` 160 @ 16 kHz) × `subsampling_factor` 8 = 80 ms.
+* One encoder frame = 10 ms mel hop (`hop_length` 160 @ 16 kHz) × `subsampling_factor` 8 = 80 ms.
  * Both numbers come from the repo's own preprocessor_config.json / config.json.
  */
 const CTC_FRAME_SECONDS = 0.08
@@ -390,16 +516,74 @@ async function transcribeCtc(asr: ASR, wave: Float32Array, offsetSeconds: number
     }
   }
   const words = chunks.filter((c) => c.text)
-  return { text: words.map((c) => c.text).join(' '), chunks: words }
+  return { text: words.map((c) => c.text).join(' '), chunks: words, timing: 'word' }
+}
+
+/**
+ * Whisper's language names ("english") are not what `cohere_asr` wants: `CohereAsrProcessor
+ * .get_decoder_prompt_ids` builds a 10-token prompt containing `<|${language}|>`, i.e. an ISO
+ * code. The model has no auto-detect at all, and 'en' is the library's own default, so anything
+ * it doesn't speak (auto / yue / tl) lands there.
+ */
+const COHERE_LANG: Record<string, string> = { english: 'en', chinese: 'zh', japanese: 'ja' }
+
+/**
+ * The VAD's speech regions that overlap one chunk, clipped to it — what the interpolator lays the
+ * words out over, so no manufactured word time lands inside a pause.
+ *
+ * `null` regions (VAD unavailable) or a chunk nothing intersects fall back to the whole span,
+ * which is the pre-VAD behaviour: still monotonic, just blind to the silences inside.
+ */
+function regionsInChunk(
+  all: Region[] | null,
+  startSeconds: number,
+  endSeconds: number,
+): SpeechRegion[] {
+  const whole: SpeechRegion[] = [{ start: startSeconds, end: endSeconds }]
+  if (!all) return whole
+  const inside = all
+    .map((r) => ({ start: Math.max(r.start, startSeconds), end: Math.min(r.end, endSeconds) }))
+    .filter((r) => r.end > r.start)
+  return inside.length ? inside : whole
+}
+
+/**
+ * Timestamp-free models (`cohere_asr`): the pipeline hands back one string and nothing else, so
+ * word times are interpolated across the chunk's speech spans (ADR-0016). No `WhisperTextStreamer`
+ * here, it decodes Whisper timestamp tokens, so live partials are off for these models.
+ *
+ * `speech` is the VAD sweep `transcribe` already ran; the words are spread over the real speech
+ * inside this chunk rather than over its whole span, so pauses stay empty.
+ */
+async function transcribeUntimed(
+  asr: ASR,
+  wave: Float32Array,
+  opts: WorkerTranscribeOpts,
+  offsetSeconds: number,
+  speech: Region[] | null,
+): Promise<ASRResult> {
+  const seconds = wave.length / WHISPER_SAMPLE_RATE
+  const out = (await asr(wave, {
+    // Cohere's card suggests a duration-proportional cap as the anti-hallucination device; a flat
+    // 160 truncates dense Mandarin on a full chunk. `generate`'s own default is max_length 20.
+    max_new_tokens: Math.ceil(seconds * 8) + 16,
+    no_repeat_ngram_size: 3,
+    language: COHERE_LANG[opts.language ?? ''] ?? 'en',
+  })) as ASRResult
+  const text = out.text?.trim() ?? ''
+  const regions = regionsInChunk(speech, offsetSeconds, offsetSeconds + seconds)
+  return { text, chunks: interpolateWords(text, regions), timing: 'interpolated' }
 }
 
 async function transcribeOne(
   asr: ASR,
+  model: CatalogModel,
   wave: Float32Array,
   opts: WorkerTranscribeOpts,
   offsetSeconds: number,
   committedText: string,
   onPartial: (text: string) => void,
+  speech: Region[] | null,
 ): Promise<ASRResult> {
   // CTC path: no generation at all, so none of the decode knobs below apply — no language/task
   // (the pipeline only warns, but they mean nothing), no max_new_tokens/no_repeat_ngram_size/
@@ -410,7 +594,7 @@ async function transcribeOne(
     if (opts.partial) onPartial(normalizePartial(`${committedText} ${out.text}`))
     return out
   }
-
+  if (model.timestamps === 'none') return transcribeUntimed(asr, wave, opts, offsetSeconds, speech)
   // Fresh streamer per attempt, so a failed-then-retried run doesn't double the live partial.
   const run = async (extra: Record<string, unknown>): Promise<ASRResult> => {
     let streamer: WhisperTextStreamer | undefined
@@ -443,7 +627,13 @@ async function transcribeOne(
     ? {}
     : { language: opts.language, task: opts.task ?? 'transcribe' }
 
-  let extra: Record<string, unknown> = { ...multilingual, return_timestamps: 'word' }
+  // An export without cross-attentions can only do chunk timestamps; the catalog says so upfront
+  // rather than paying for the failed word-timestamp attempt first.
+  let degraded = model.timestamps === 'chunk'
+  let extra: Record<string, unknown> = {
+    ...multilingual,
+    return_timestamps: degraded ? true : 'word',
+  }
   let escalated = false
   for (;;) {
     try {
@@ -457,7 +647,7 @@ async function transcribeOne(
         extra = { ...extra, do_sample: true, temperature: 0.4, no_repeat_ngram_size: 2 }
         continue
       }
-      return out
+      return degraded ? { ...out, timing: 'chunk' } : out
     } catch (e) {
       const msg = String((e as Error)?.message ?? e)
       // (1) Model rejects language+task -> drop them and retry (English-only .en builds).
@@ -473,6 +663,7 @@ async function transcribeOne(
       // failing. The catalog turbo uses the *_timestamped export so it never lands here.
       if (/cross attentions|output_attentions/i.test(msg) && extra.return_timestamps === 'word') {
         extra = { ...extra, return_timestamps: true }
+        degraded = true
         continue
       }
       throw e
@@ -487,13 +678,26 @@ interface Sink {
 
 async function transcribe(
   asr: ASR,
+  model: CatalogModel,
   pcm: Int16Array,
   opts: WorkerTranscribeOpts,
   sink: Sink,
 ): Promise<ASRResult> {
   const totalSeconds = pcm.length / WHISPER_SAMPLE_RATE
+  // One VAD sweep over the whole buffer: it both gates silence and decides where the chunks cut.
+  // `null` means the VAD is unavailable, and everything below reverts to the pre-VAD behaviour.
+  const regions = await speechRegions(pcm)
+  const done = (result: ASRResult): ASRResult => (regions ? { ...result, speech: regions } : result)
+
+  // No speech anywhere: nothing to decode. A live tail of pure silence lands here and returns
+  // cleanly rather than handing Whisper a buffer it would hallucinate over.
+  if (regions?.length === 0) {
+    sink.progress({ ratio: 1, chunkIndex: 1, chunkCount: 1, completedSeconds: totalSeconds, totalSeconds })
+    return done({ text: '', chunks: [] })
+  }
+
   if (totalSeconds <= MAX_DIRECT_TRANSCRIBE_SECONDS) {
-    const only = await transcribeOne(asr, toFloat32(pcm), opts, 0, '', sink.partial)
+    const only = await transcribeOne(asr, model, toFloat32(pcm), opts, 0, '', sink.partial, regions)
     sink.progress({
       ratio: 1,
       chunkIndex: 1,
@@ -501,33 +705,38 @@ async function transcribe(
       completedSeconds: totalSeconds,
       totalSeconds,
     })
-    return only
+    return done(only)
   }
 
   const results: ASRResult[] = []
-  const chunks = plannedChunks(pcm.length)
-  for (const chunk of chunks) {
-    const slice = pcm.subarray(chunk.startSample, chunk.endSample)
-    if (hasDetectableSignal(slice)) {
+  const chunks = regions ? packChunks(regions, MAX_CHUNK_SECONDS) : gridChunks(totalSeconds, MAX_CHUNK_SECONDS)
+  for (const [index, chunk] of chunks.entries()) {
+    const startSample = Math.max(0, Math.floor(chunk.startSeconds * WHISPER_SAMPLE_RATE))
+    const endSample = Math.min(pcm.length, Math.ceil(chunk.endSeconds * WHISPER_SAMPLE_RATE))
+    const slice = pcm.subarray(startSample, endSample)
+    // A VAD-packed chunk is speech by construction; only the fallback grid needs a silence gate.
+    if (regions || hasDetectableSignalFallback(slice)) {
       const out = await transcribeOne(
         asr,
+        model,
         toFloat32(slice),
         opts,
-        chunk.startSeconds,
+        startSample / WHISPER_SAMPLE_RATE, // keep timestamps absolute
         results.map((r) => r.text?.trim()).filter(Boolean).join(' '),
         sink.partial,
+        regions,
       )
       results.push(out)
     }
     sink.progress({
       ratio: totalSeconds > 0 ? Math.min(chunk.endSeconds / totalSeconds, 1) : 1,
-      chunkIndex: chunk.index + 1,
+      chunkIndex: index + 1,
       chunkCount: chunks.length,
       completedSeconds: Math.min(chunk.endSeconds, totalSeconds),
       totalSeconds,
     })
   }
-  return mergeResults(results)
+  return done(mergeResults(results))
 }
 
 function isWebGpuRuntimeError(e: unknown): boolean {
@@ -560,7 +769,10 @@ async function handle(req: Exclude<WorkerRequest, { type: 'dispose' }>): Promise
     const wave = new Float32Array(secs * sr)
     for (let i = 0; i < wave.length; i++) wave[i] = 0.04 * Math.sin(i * 0.06)
     const t0 = performance.now()
-    await engine(wave, { language: 'english', chunk_length_s: 30 })
+    // `cohere_asr` wants an ISO code, not a Whisper language name (see COHERE_LANG): an unknown
+    // `<|lang|>` token would poison the decoder prompt it builds from it.
+    const language = req.model.family === 'cohere-transcribe' ? 'en' : 'english'
+    await engine(wave, { language, chunk_length_s: 30 })
     const el = (performance.now() - t0) / 1000
     post({ id, type: 'done', rtf: el > 0 ? secs / el : 0 })
     return
@@ -575,7 +787,11 @@ async function handle(req: Exclude<WorkerRequest, { type: 'dispose' }>): Promise
   const loaded = await loadEngine(req.model, req.device, onLoad)
   post({ id, type: 'device', device: loaded.device })
   try {
-    post({ id, type: 'done', result: await transcribe(loaded.engine, req.pcm, req.opts, sink) })
+    post({
+      id,
+      type: 'done',
+      result: await transcribe(loaded.engine, req.model, req.pcm, req.opts, sink),
+    })
   } catch (e) {
     if (req.device !== 'webgpu' || req.model.requiresWebGPU || !isWebGpuRuntimeError(e)) throw e
     // A GPU driver hiccup mid-run: drop the session, re-load on WASM and start over. The two
@@ -584,7 +800,11 @@ async function handle(req: Exclude<WorkerRequest, { type: 'dispose' }>): Promise
     post({ id, type: 'device', device: 'wasm' })
     const fallback = await loadEngine(req.model, 'wasm', onLoad)
     post({ id, type: 'device', device: 'wasm' })
-    post({ id, type: 'done', result: await transcribe(fallback.engine, req.pcm, req.opts, sink) })
+    post({
+      id,
+      type: 'done',
+      result: await transcribe(fallback.engine, req.model, req.pcm, req.opts, sink),
+    })
   }
 }
 

@@ -199,7 +199,7 @@ async function tickBody(final: boolean): Promise<void> {
     setLive({ interimText: '' })
     return
   }
-  const language = languageName(primaryLanguage, activeModel.englishOnly)
+  const language = languageName(primaryLanguage, activeModel.englishOnly, activeModel.forceLanguage)
   const out = await transcribeWithEngine(activeModel, capability?.device ?? 'wasm', tail, {
     language,
     englishOnly: activeModel.englishOnly,
@@ -568,7 +568,7 @@ export const useApp = create<AppState>((set, get) => ({
         ac.signal,
       )
       patch({ phase: 'loading', pct: 0, etaSec: estimateEta(durationSec, capability?.benchmarkRtf ?? null) })
-      const language = languageName(primaryLanguage, activeModel.englishOnly)
+      const language = languageName(primaryLanguage, activeModel.englishOnly, activeModel.forceLanguage)
       const out = await transcribeWithEngine(activeModel, device, pcm, {
         signal: ac.signal,
         language,
@@ -673,7 +673,7 @@ export const useApp = create<AppState>((set, get) => ({
         ac.signal,
       )
       patch({ phase: 'loading', pct: 0, etaSec: estimateEta(durationSec, capability?.benchmarkRtf ?? null) })
-      const language = languageName(primaryLanguage, activeModel.englishOnly)
+      const language = languageName(primaryLanguage, activeModel.englishOnly, activeModel.forceLanguage)
       const out = await transcribeWithEngine(activeModel, device, pcm, {
         signal: ac.signal,
         language,
@@ -839,7 +839,7 @@ export const useApp = create<AppState>((set, get) => ({
     const { activeModel, primaryLanguage } = get()
     const asr: AsrLayer = {
       segments: liveSegments.slice(),
-      language: existing?.asr.language ?? languageName(primaryLanguage, activeModel?.englishOnly ?? false) ?? 'auto',
+      language: existing?.asr.language ?? languageName(primaryLanguage, activeModel?.englishOnly ?? false, activeModel?.forceLanguage) ?? 'auto',
       task: 'transcribe',
     }
     const durationSec = totalSamples / SR
