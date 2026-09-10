@@ -1,33 +1,27 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Play,
-  Pause,
-  Download,
-  Search,
-  Scissors,
-  Combine,
-  Trash2,
-  Plus,
-  Paperclip,
-  Pencil,
-  Undo2,
-  Redo2,
-  RotateCcw,
-  Square,
-  Mic,
-  X,
-} from 'lucide-react'
-import { useApp } from '@/lib/store'
+import { ScreenHeader } from '@/components/ScreenHeader'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { Progress } from '@/components/ui/progress'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { getMediaAsset, saveMediaAsset, saveTranscript } from '@/lib/db'
 import {
-  editWordText,
   deleteWord,
-  insertWordAfter,
-  splitSegment,
-  mergeSegmentWithNext,
+  editWordText,
   findReplaceAll,
+  insertWordAfter,
+  mergeSegmentWithNext,
+  splitSegment,
 } from '@/lib/edit-ops'
-import { exportTranscript, downloadText } from '@/lib/exporters'
+import { downloadText, exportTranscript } from '@/lib/exporters'
+import {
+  buildFlatWords,
+  findActiveWord,
+  useActiveWord,
+  usePlayhead,
+  type FlatWord,
+} from '@/lib/playback'
+import { useApp } from '@/lib/store'
 import {
   alternateByTurn,
   assignSpeakerForward,
@@ -35,20 +29,26 @@ import {
   turnStarts,
 } from '@/lib/turns'
 import type { AsrSegment, EditSegment, ExportFormat, ExportLayer, Speakers } from '@/lib/types'
-import {
-  usePlayhead,
-  useActiveWord,
-  buildFlatWords,
-  findActiveWord,
-  type FlatWord,
-} from '@/lib/playback'
 import { cn, formatTime, uid } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
-import { Progress } from '@/components/ui/progress'
-import { Switch } from '@/components/ui/switch'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
-import { ScreenHeader } from '@/components/ScreenHeader'
+import {
+  Combine,
+  Download,
+  Mic,
+  Paperclip,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  Redo2,
+  RotateCcw,
+  Scissors,
+  Search,
+  Square,
+  Trash2,
+  Undo2,
+  X,
+} from 'lucide-react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 const FORMATS: ExportFormat[] = ['txt', 'srt', 'vtt', 'json', 'md']
 
@@ -620,7 +620,7 @@ export function TranscriptView() {
     <div className="space-y-8">
       <ScreenHeader
         title={record.source.filename}
-        back={{ label: 'Transcribe', onClick: () => setView('workspace') }}
+        back={{ label: 'History', onClick: () => setView('history') }}
         subtitle={
           <span className="lt-eyebrow">
             {record.model} · {record.asr.language} ·{' '}
