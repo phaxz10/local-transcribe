@@ -26,7 +26,7 @@ const REVISION = 'main'
 const PART_BYTES = 8 * 1024 * 1024
 
 /** Verified against DEFAULT_DTYPE_SUFFIX_MAPPING in @huggingface/transformers v4.2.0. */
-const DTYPE_SUFFIX = { fp32: '', fp16: '_fp16', q8: '_quantized', q4: '_q4' } as const
+const DTYPE_SUFFIX = { fp32: '', fp16: '_fp16', q8: '_quantized', q4: '_q4', q4f16: '_q4f16' } as const
 type Dtype = keyof typeof DTYPE_SUFFIX
 
 const CONFIG_FILES = [
@@ -44,6 +44,8 @@ const CONFIG_FILES = [
  * this prefetches files nobody then loads (wasteful, not broken).
  */
 function dtypesFor(model: CatalogModel, device: EngineDevice): { encoder: Dtype; decoder: Dtype } {
+  // Cohere Transcribe is WebGPU-only and has exactly one usable dtype; `dtypeFor` throws on WASM.
+  if (model.family === 'cohere-transcribe') return { encoder: 'q4f16', decoder: 'q4f16' }
   const large = model.family === 'large-v3-turbo'
   if (device === 'webgpu') {
     return large ? { encoder: 'fp16', decoder: 'q4' } : { encoder: 'fp16', decoder: 'fp16' }
@@ -52,18 +54,26 @@ function dtypesFor(model: CatalogModel, device: EngineDevice): { encoder: Dtype;
 }
 
 /**
- * The repo-relative files the pipeline will ask for. No `.onnx_data` sibling is listed: only
- * `whisper-large-v3-turbo_timestamped`'s *fp32* encoder declares `use_external_data_format`, and
- * no dtype policy above ever picks fp32 for that model. (Verified: every other `*.onnx_data`
- * candidate 404s on the Hub.)
+ * The repo-relative files the pipeline will ask for.
+ *
+ * The Whisper entries list no `.onnx_data` sibling: only `whisper-large-v3-turbo_timestamped`'s
+ * *fp32* encoder declares `use_external_data_format`, and no dtype policy above ever picks fp32
+ * for that model. (Verified: every other `*.onnx_data` candidate 404s on the Hub.)
+ *
+ * Cohere Transcribe is the opposite case: its `transformers.js_config.use_external_data_format`
+ * declares 1 chunk for both `encoder_model_q4f16.onnx` and `decoder_model_merged`, which
+ * `getExternalDataChunkNames` (v4.2.0) turns into a single `<name>.onnx_data` each, fetched
+ * through the same `getModelFile` path we seed. It also needs `processor_config.json`
+ * (`CohereAsrProcessor.uses_processor_config = true`), which no Whisper export has.
  */
 export function modelFiles(model: CatalogModel, device: EngineDevice): string[] {
   const { encoder, decoder } = dtypesFor(model, device)
-  return [
-    ...CONFIG_FILES,
-    `onnx/encoder_model${DTYPE_SUFFIX[encoder]}.onnx`,
-    `onnx/decoder_model_merged${DTYPE_SUFFIX[decoder]}.onnx`,
-  ]
+  const enc = `onnx/encoder_model${DTYPE_SUFFIX[encoder]}.onnx`
+  const dec = `onnx/decoder_model_merged${DTYPE_SUFFIX[decoder]}.onnx`
+  if (model.family === 'cohere-transcribe') {
+    return [...CONFIG_FILES, 'processor_config.json', enc, `${enc}_data`, dec, `${dec}_data`]
+  }
+  return [...CONFIG_FILES, enc, dec]
 }
 
 export function fileUrl(hfId: string, file: string): string {

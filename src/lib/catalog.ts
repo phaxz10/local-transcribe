@@ -1,6 +1,9 @@
 import type { CapabilityReport, CatalogModel, PrimaryLanguage } from './types'
 
-const FAMILY_ORDER: CatalogModel['family'][] = ['small', 'large-v3-turbo']
+// Better last. Cohere Transcribe outranks small but sits BELOW turbo on purpose: it wins on WER
+// but has no word timings, and click-to-seek is what people expect from the recommended default.
+// It is a deliberate manual pick, not a recommendation.
+const FAMILY_ORDER: CatalogModel['family'][] = ['small', 'cohere-transcribe', 'large-v3-turbo']
 
 type Entry = Omit<CatalogModel, 'available'>
 
@@ -15,6 +18,11 @@ const ENTRIES: Entry[] = [
   // "Model outputs must contain cross attentions"; the `_timestamped` sibling is re-exported with
   // output_attentions=True (same q4/fp16 ONNX variants). Don't revert this id, it reintroduces the crash.
   { id: 'large-v3-turbo', label: 'Large v3 Turbo', task: 'transcription', family: 'large-v3-turbo', hfId: 'onnx-community/whisper-large-v3-turbo_timestamped', englishOnly: false, multilingual: true, sizeMb: 1600, ramCeilingMb: 2400, requiresWebGPU: true, languages: { en: 3, zh: 3, ja: 3, yue: 2, tl: 2 } },
+  // #1 on the Open ASR Leaderboard (4.67 avg WER vs turbo's 6.36), Apache-2.0, and the same
+  // download size as turbo. It emits NO timestamps of any kind and has no language auto-detect,
+  // so word times are interpolated (ADR-0016) and `yue`/`tl` are 0 (the model doesn't speak them).
+  // Measured q4f16: encoder 1436 MB + decoder 98 MB + configs ≈ 1536 MB.
+  { id: 'cohere-transcribe', label: 'Cohere Transcribe', task: 'transcription', family: 'cohere-transcribe', hfId: 'onnx-community/cohere-transcribe-03-2026-ONNX', englishOnly: false, multilingual: true, sizeMb: 1540, ramCeilingMb: 3000, requiresWebGPU: true, timestamps: 'none', languages: { en: 3, zh: 3, ja: 3, yue: 0, tl: 0 } },
 ]
 
 export function buildCatalog(): CatalogModel[] {

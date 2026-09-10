@@ -9,6 +9,7 @@
  */
 import { pipeline, env, WhisperTextStreamer } from '@huggingface/transformers'
 import type { CatalogModel, EngineDevice } from './types'
+import { interpolateWords, type SpeechRegion } from './interpolate-times'
 
 // Remote HF models only; Transformers.js caches weights in Cache Storage.
 env.allowLocalModels = false
@@ -28,6 +29,11 @@ export interface ASRChunk {
 export interface ASRResult {
   text: string
   chunks?: ASRChunk[]
+  /**
+   * Where the word times in `chunks` came from. Absent = 'word' (the normal Whisper case).
+   * 'chunk' = the cross-attention degrade below; 'interpolated' = manufactured (ADR-0016).
+   */
+  timing?: 'word' | 'chunk' | 'interpolated'
 }
 
 export interface LoadStatus {
@@ -90,6 +96,16 @@ type ASR = Awaited<ReturnType<typeof pipeline>> & {
 }
 
 function dtypeFor(model: CatalogModel, device: EngineDevice): unknown {
+  if (model.family === 'cohere-transcribe') {
+    // 2B params, >90% of them in the Conformer encoder. q4f16 (1.44 GB encoder + 98 MB decoder) is
+    // the only variant in the GPU budget, and the repo's own `transformers.js_config` pins the
+    // kv-cache to float16 for exactly that dtype. There is no WASM policy on purpose: the catalog
+    // entry is `requiresWebGPU`, so this only fires if something forces the fallback.
+    if (device !== 'webgpu') {
+      throw new Error(`${model.label} needs WebGPU and has no CPU build; pick another model.`)
+    }
+    return 'q4f16'
+  }
   const large = model.family === 'large-v3-turbo'
   if (device === 'webgpu') {
     // large-v3-turbo: fp16 encoder + 4-bit decoder. (The onnx-community fp16 *merged decoder* trips
@@ -297,10 +313,19 @@ function offsetResult(out: ASRResult, offsetSeconds: number): ASRResult {
   }
 }
 
+/** Worst granularity wins: one interpolated chunk makes the whole transcript approximate. */
+function mergeTiming(results: ASRResult[]): ASRResult['timing'] {
+  if (results.some((r) => r.timing === 'interpolated')) return 'interpolated'
+  if (results.some((r) => r.timing === 'chunk')) return 'chunk'
+  return undefined
+}
+
 function mergeResults(results: ASRResult[]): ASRResult {
+  const timing = mergeTiming(results)
   return {
     text: results.map((r) => r.text?.trim()).filter(Boolean).join(' '),
     chunks: results.flatMap((r) => r.chunks ?? []),
+    ...(timing ? { timing } : {}),
   }
 }
 
@@ -329,14 +354,51 @@ function hasDetectableSignal(pcm: Int16Array): boolean {
   return false
 }
 
+/**
+ * Whisper's language names ("english") are not what `cohere_asr` wants: `CohereAsrProcessor
+ * .get_decoder_prompt_ids` builds a 10-token prompt containing `<|${language}|>`, i.e. an ISO
+ * code. The model has no auto-detect at all, and 'en' is the library's own default, so anything
+ * it doesn't speak (auto / yue / tl) lands there.
+ */
+const COHERE_LANG: Record<string, string> = { english: 'en', chinese: 'zh', japanese: 'ja' }
+
+/**
+ * Timestamp-free models (`cohere_asr`): the pipeline hands back one string and nothing else, so
+ * word times are interpolated across the chunk's speech spans (ADR-0016). No `WhisperTextStreamer`
+ * here, it decodes Whisper timestamp tokens, so live partials are off for these models.
+ *
+ * ponytail: with no VAD in the worker yet (proposal item 1), the "speech spans" are the whole
+ * chunk. When Silero VAD lands, pass its real speech regions and the times get honest for free.
+ */
+async function transcribeUntimed(
+  asr: ASR,
+  wave: Float32Array,
+  opts: WorkerTranscribeOpts,
+  offsetSeconds: number,
+): Promise<ASRResult> {
+  const seconds = wave.length / WHISPER_SAMPLE_RATE
+  const out = (await asr(wave, {
+    // Cohere's card suggests a duration-proportional cap as the anti-hallucination device; a flat
+    // 160 truncates dense Mandarin on a full chunk. `generate`'s own default is max_length 20.
+    max_new_tokens: Math.ceil(seconds * 8) + 16,
+    no_repeat_ngram_size: 3,
+    language: COHERE_LANG[opts.language ?? ''] ?? 'en',
+  })) as ASRResult
+  const text = out.text?.trim() ?? ''
+  const regions: SpeechRegion[] = [{ start: offsetSeconds, end: offsetSeconds + seconds }]
+  return { text, chunks: interpolateWords(text, regions), timing: 'interpolated' }
+}
+
 async function transcribeOne(
   asr: ASR,
+  model: CatalogModel,
   wave: Float32Array,
   opts: WorkerTranscribeOpts,
   offsetSeconds: number,
   committedText: string,
   onPartial: (text: string) => void,
 ): Promise<ASRResult> {
+  if (model.timestamps === 'none') return transcribeUntimed(asr, wave, opts, offsetSeconds)
   // Fresh streamer per attempt, so a failed-then-retried run doesn't double the live partial.
   const run = async (extra: Record<string, unknown>): Promise<ASRResult> => {
     let streamer: WhisperTextStreamer | undefined
@@ -369,7 +431,13 @@ async function transcribeOne(
     ? {}
     : { language: opts.language, task: opts.task ?? 'transcribe' }
 
-  let extra: Record<string, unknown> = { ...multilingual, return_timestamps: 'word' }
+  // An export without cross-attentions can only do chunk timestamps; the catalog says so upfront
+  // rather than paying for the failed word-timestamp attempt first.
+  let degraded = model.timestamps === 'chunk'
+  let extra: Record<string, unknown> = {
+    ...multilingual,
+    return_timestamps: degraded ? true : 'word',
+  }
   let escalated = false
   for (;;) {
     try {
@@ -383,7 +451,7 @@ async function transcribeOne(
         extra = { ...extra, do_sample: true, temperature: 0.4, no_repeat_ngram_size: 2 }
         continue
       }
-      return out
+      return degraded ? { ...out, timing: 'chunk' } : out
     } catch (e) {
       const msg = String((e as Error)?.message ?? e)
       // (1) Model rejects language+task -> drop them and retry (English-only .en builds).
@@ -399,6 +467,7 @@ async function transcribeOne(
       // failing. The catalog turbo uses the *_timestamped export so it never lands here.
       if (/cross attentions|output_attentions/i.test(msg) && extra.return_timestamps === 'word') {
         extra = { ...extra, return_timestamps: true }
+        degraded = true
         continue
       }
       throw e
@@ -413,13 +482,14 @@ interface Sink {
 
 async function transcribe(
   asr: ASR,
+  model: CatalogModel,
   pcm: Int16Array,
   opts: WorkerTranscribeOpts,
   sink: Sink,
 ): Promise<ASRResult> {
   const totalSeconds = pcm.length / WHISPER_SAMPLE_RATE
   if (totalSeconds <= MAX_DIRECT_TRANSCRIBE_SECONDS) {
-    const only = await transcribeOne(asr, toFloat32(pcm), opts, 0, '', sink.partial)
+    const only = await transcribeOne(asr, model, toFloat32(pcm), opts, 0, '', sink.partial)
     sink.progress({
       ratio: 1,
       chunkIndex: 1,
@@ -437,6 +507,7 @@ async function transcribe(
     if (hasDetectableSignal(slice)) {
       const out = await transcribeOne(
         asr,
+        model,
         toFloat32(slice),
         opts,
         chunk.startSeconds,
@@ -486,7 +557,10 @@ async function handle(req: Exclude<WorkerRequest, { type: 'dispose' }>): Promise
     const wave = new Float32Array(secs * sr)
     for (let i = 0; i < wave.length; i++) wave[i] = 0.04 * Math.sin(i * 0.06)
     const t0 = performance.now()
-    await engine(wave, { language: 'english', chunk_length_s: 30 })
+    // `cohere_asr` wants an ISO code, not a Whisper language name (see COHERE_LANG): an unknown
+    // `<|lang|>` token would poison the decoder prompt it builds from it.
+    const language = req.model.family === 'cohere-transcribe' ? 'en' : 'english'
+    await engine(wave, { language, chunk_length_s: 30 })
     const el = (performance.now() - t0) / 1000
     post({ id, type: 'done', rtf: el > 0 ? secs / el : 0 })
     return
@@ -501,7 +575,11 @@ async function handle(req: Exclude<WorkerRequest, { type: 'dispose' }>): Promise
   const loaded = await loadEngine(req.model, req.device, onLoad)
   post({ id, type: 'device', device: loaded.device })
   try {
-    post({ id, type: 'done', result: await transcribe(loaded.engine, req.pcm, req.opts, sink) })
+    post({
+      id,
+      type: 'done',
+      result: await transcribe(loaded.engine, req.model, req.pcm, req.opts, sink),
+    })
   } catch (e) {
     if (req.device !== 'webgpu' || req.model.requiresWebGPU || !isWebGpuRuntimeError(e)) throw e
     // A GPU driver hiccup mid-run: drop the session, re-load on WASM and start over. The two
@@ -510,7 +588,11 @@ async function handle(req: Exclude<WorkerRequest, { type: 'dispose' }>): Promise
     post({ id, type: 'device', device: 'wasm' })
     const fallback = await loadEngine(req.model, 'wasm', onLoad)
     post({ id, type: 'device', device: 'wasm' })
-    post({ id, type: 'done', result: await transcribe(fallback.engine, req.pcm, req.opts, sink) })
+    post({
+      id,
+      type: 'done',
+      result: await transcribe(fallback.engine, req.model, req.pcm, req.opts, sink),
+    })
   }
 }
 

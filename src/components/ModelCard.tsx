@@ -103,6 +103,7 @@ export function ModelCard({
 
       <p className="text-sm leading-relaxed text-muted-foreground">
         {modelScope}. {engineNote}.
+        {model.timestamps === 'none' && ' No word timings: seek is approximate.'}
       </p>
 
       <div className="mt-auto flex items-center justify-between gap-3 border-t pt-3">
