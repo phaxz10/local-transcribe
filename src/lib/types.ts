@@ -168,6 +168,7 @@ export const PRIMARY_LANGUAGES = [
   { code: 'yue', label: 'Cantonese' },
   { code: 'ja', label: 'Japanese' },
   { code: 'tl', label: 'Tagalog' },
+  { code: 'ko', label: 'Korean' },
   { code: 'auto', label: 'Other / Mixed' },
 ] as const
 export type PrimaryLanguage = (typeof PRIMARY_LANGUAGES)[number]['code']

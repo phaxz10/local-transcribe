@@ -33,7 +33,7 @@ Stage two of a transcription, not a Catalog entry: the Transcript is transcribed
 | Pair | HF id | ~Size (q8) | Files | Notes |
 |---|---|---|---|---|
 | **`zh-en`** (Mandarin, and Cantonese as best effort) | `Xenova/opus-mt-zh-en` | **113 MB** | `onnx/encoder_model_quantized.onnx` 52.9 MB + `onnx/decoder_model_merged_quantized.onnx` 60.2 MB + tokenizer/config | Verified: three sentences in 0.2 s on CPU. Cantonese has no `yue-en` Marian; Whisper writes Cantonese out as written Chinese, which this reads |
-| **`ja-en`** (Japanese) | `Xenova/opus-mt-ja-en` | ~108 MB | 58 + 50 MB | Same shape as `zh-en` |
+| **`ja-en`** (Japanese) | `Xenova/opus-mt-ja-en`, `Xenova/opus-mt-ko-en` (Korean, 113 MB) | ~108 MB | 58 + 50 MB | Same shape as `zh-en` |
 | Tagalog | — | — | — | **No model.** No `Xenova/opus-mt-tl-en` exists; the Transcribe screen says so instead of offering a dead switch |
 
 Batched 8 texts per `generate` call, `max_new_tokens = min(256, 4 × longest source character count + 16)`. Word times inside a translated Segment are **interpolated** across that Segment's span (ADR-0016's helper), because English word order does not line up with the source.

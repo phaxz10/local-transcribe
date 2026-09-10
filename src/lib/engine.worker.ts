@@ -25,7 +25,7 @@ env.allowLocalModels = false
 
 const WHISPER_SAMPLE_RATE = 16000
 /** Languages whose Whisper tokens run 1-3 per character (decode budgets differ). */
-const CJK_LANGS = new Set(['chinese', 'cantonese', 'japanese'])
+const CJK_LANGS = new Set(['chinese', 'cantonese', 'japanese', 'korean'])
 const MAX_DIRECT_TRANSCRIBE_SECONDS = 30
 /** Int16 equivalent of the old 0.0008 float peak threshold (0.0008 × 32768). */
 const SIGNAL_THRESHOLD = 26
@@ -637,7 +637,7 @@ async function transcribeCtc(asr: ASR, wave: Float32Array, offsetSeconds: number
  * code. The model has no auto-detect at all, and 'en' is the library's own default, so anything
  * it doesn't speak (auto / yue / tl) lands there.
  */
-const COHERE_LANG: Record<string, string> = { english: 'en', chinese: 'zh', japanese: 'ja' }
+const COHERE_LANG: Record<string, string> = { english: 'en', chinese: 'zh', japanese: 'ja', korean: 'ko' }
 
 /**
  * The VAD's speech regions that overlap one chunk, clipped to it — what the interpolator lays the

@@ -8,7 +8,7 @@
 import type { PrimaryLanguage } from './types'
 
 /** A Marian (Helsinki Opus-MT) direction we ship. English is always the target. */
-export type TranslationPair = 'zh-en' | 'ja-en'
+export type TranslationPair = 'zh-en' | 'ja-en' | 'ko-en'
 
 /** The HF repo for a pair. `Xenova/opus-mt-zh-en` is 113 MB at q8, `ja-en` ~108 MB. */
 export function translationModelId(pair: TranslationPair): string {
@@ -29,6 +29,7 @@ const PAIRS: Record<string, TranslationPair> = {
   yue: 'zh-en',
   cantonese: 'zh-en',
   ja: 'ja-en',
+  ko: 'ko-en',
   japanese: 'ja-en',
 }
 
@@ -42,6 +43,8 @@ const LABELS: Record<string, string> = {
   yue: 'Cantonese',
   cantonese: 'Cantonese',
   ja: 'Japanese',
+  ko: 'Korean',
+  korean: 'Korean',
   japanese: 'Japanese',
 }
 

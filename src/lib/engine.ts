@@ -30,6 +30,7 @@ const LANG_NAMES: Record<string, string> = {
   yue: 'chinese',
   ja: 'japanese',
   tl: 'tagalog',
+  ko: 'korean',
 }
 
 export function languageName(

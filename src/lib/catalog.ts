@@ -29,14 +29,14 @@ const ENTRIES: Entry[] = [
   // v4.2.0's ASR pipeline routes `parakeet_ctc` down the wav2vec2 branch, which returns text only,
   // so the worker aligns word timestamps from the CTC frames itself (see `transcribeCtc`).
   { id: 'parakeet-en', label: 'Parakeet (English)', task: 'transcription', family: 'parakeet-ctc', hfId: 'onnx-community/parakeet-ctc-0.6b-ONNX', englishOnly: true, multilingual: false, sizeMb: 643, sizeMbWasm: 612, ramCeilingMb: 1250, requiresWebGPU: false, timestamps: 'word', languages: { en: 3 } },
-  { id: 'small', label: 'Small', task: 'transcription', family: 'small', hfId: 'Xenova/whisper-small', englishOnly: false, multilingual: true, sizeMb: 520, ramCeilingMb: 1200, requiresWebGPU: false, languages: { en: 2, zh: 2, ja: 2, yue: 1, tl: 2 } },
+  { id: 'small', label: 'Small', task: 'transcription', family: 'small', hfId: 'Xenova/whisper-small', englishOnly: false, multilingual: true, sizeMb: 520, ramCeilingMb: 1200, requiresWebGPU: false, languages: { en: 2, zh: 2, ja: 2, yue: 1, tl: 2, ko: 2 } },
   // We request word-level timestamps (return_timestamps: 'word'), which needs a decoder exported
   // WITH cross-attentions. The canonical `whisper-large-v3-turbo` export lacks them and throws
   // "Model outputs must contain cross attentions"; the `_timestamped` sibling is re-exported with
   // output_attentions=True (same q4/fp16 ONNX variants). Don't revert this id, it reintroduces the crash.
   // yue: 0, not 2. Turbo scores 43.3% CER on FLEURS Cantonese, a 4x regression against large-v3;
   // `small-yue` below is 7.93% CER at a quarter of the download (docs/research-asr-2026-09.md §1).
-  { id: 'large-v3-turbo', label: 'Large v3 Turbo', task: 'transcription', family: 'large-v3-turbo', hfId: 'onnx-community/whisper-large-v3-turbo_timestamped', englishOnly: false, multilingual: true, sizeMb: 1600, ramCeilingMb: 2400, requiresWebGPU: true, languages: { en: 3, zh: 2, ja: 3, yue: 0, tl: 2 } },
+  { id: 'large-v3-turbo', label: 'Large v3 Turbo', task: 'transcription', family: 'large-v3-turbo', hfId: 'onnx-community/whisper-large-v3-turbo_timestamped', englishOnly: false, multilingual: true, sizeMb: 1600, ramCeilingMb: 2400, requiresWebGPU: true, languages: { en: 3, zh: 2, ja: 3, yue: 0, tl: 2, ko: 3 } },
   // Mandarin fine-tune of turbo (BELLE-2), self-exported with cross-attentions (see
   // ~/Desktop/belle-export/README.md). Word-level DTW drifts on very short chunks in this
   // fine-tune, so it runs on chunk timestamps. Same dtype policy as its family.
@@ -54,7 +54,7 @@ const ENTRIES: Entry[] = [
   // download size as turbo. It emits NO timestamps of any kind and has no language auto-detect,
   // so word times are interpolated (ADR-0016) and `yue`/`tl` are 0 (the model doesn't speak them).
   // Measured q4f16: encoder 1436 MB + decoder 98 MB + configs ≈ 1536 MB.
-  { id: 'cohere-transcribe', label: 'Cohere Transcribe', task: 'transcription', family: 'cohere-transcribe', hfId: 'onnx-community/cohere-transcribe-03-2026-ONNX', englishOnly: false, multilingual: true, sizeMb: 1540, ramCeilingMb: 3000, requiresWebGPU: true, timestamps: 'none', languages: { en: 3, zh: 3, ja: 3, yue: 0, tl: 0 } },
+  { id: 'cohere-transcribe', label: 'Cohere Transcribe', task: 'transcription', family: 'cohere-transcribe', hfId: 'onnx-community/cohere-transcribe-03-2026-ONNX', englishOnly: false, multilingual: true, sizeMb: 1540, ramCeilingMb: 3000, requiresWebGPU: true, timestamps: 'none', languages: { en: 3, zh: 3, ja: 3, yue: 0, tl: 0, ko: 3 } },
 ]
 
 export function buildCatalog(): CatalogModel[] {
@@ -128,6 +128,7 @@ if (import.meta.env.DEV) {
     recommendModel(buildCatalog(), cap, lang)?.id
   console.assert(pick('yue') === 'small-yue', 'recommendModel(yue) should be small-yue, got', pick('yue'))
   console.assert(pick('zh') === 'turbo-zh', 'recommendModel(zh) should be turbo-zh, got', pick('zh'))
+  console.assert(pick('ko') === 'large-v3-turbo', 'recommendModel(ko) should be large-v3-turbo, got', pick('ko'))
   console.assert(pick('ja') === 'large-v3-turbo', 'recommendModel(ja) should be large-v3-turbo, got', pick('ja'))
   console.assert(pick('en') === 'large-v3-turbo', 'recommendModel(en) should be large-v3-turbo, got', pick('en'))
   // English without WebGPU: Parakeet CTC, not Small. It is the reason small.en was retired.
