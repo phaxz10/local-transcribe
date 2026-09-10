@@ -373,6 +373,23 @@ function loadVad(): Promise<VadSession> {
  * for a full live tail). Still a rounding error next to a Whisper decode, but it is why this runs
  * once per request over the whole buffer rather than per chunk.
  */
+/**
+ * Peak-normalize in place. Quiet sources (a drama rip peaking at -24 dBFS) sit under the VAD's
+ * speech threshold and starve Whisper's log-mel, so whole minutes read as silence. Gain is
+ * capped so a near-silent file is not blown up into noise.
+ */
+function normalizeGain(pcm: Int16Array): void {
+  let peak = 0
+  for (let i = 0; i < pcm.length; i++) {
+    const v = pcm[i] < 0 ? -pcm[i] : pcm[i]
+    if (v > peak) peak = v
+  }
+  if (peak === 0) return
+  const gain = Math.min(30, (0.9 * 32767) / peak)
+  if (gain <= 1.05) return
+  for (let i = 0; i < pcm.length; i++) pcm[i] = Math.round(pcm[i] * gain)
+}
+
 async function speechRegions(pcm: Int16Array): Promise<Region[] | null> {
   if (vadFailed) return null
   let vad: VadSession
@@ -700,6 +717,7 @@ async function transcribe(
   const totalSeconds = pcm.length / WHISPER_SAMPLE_RATE
   // One VAD sweep over the whole buffer: it both gates silence and decides where the chunks cut.
   // `null` means the VAD is unavailable, and everything below reverts to the pre-VAD behaviour.
+  normalizeGain(pcm)
   const regions = await speechRegions(pcm)
   const done = (result: ASRResult): ASRResult => (regions ? { ...result, speech: regions } : result)
 
