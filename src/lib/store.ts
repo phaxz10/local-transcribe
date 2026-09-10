@@ -10,7 +10,7 @@ import type {
   Speakers,
   TranscriptRecord,
 } from './types'
-import { detectCapability, estimateEta } from './capability'
+import { detectCapability, estimateEta, fitCheck } from './capability'
 import { RETIRED, buildCatalog, recommendModel } from './catalog'
 import {
   deleteRecordingChunks,
@@ -31,11 +31,15 @@ import { syncWakeLock } from './wakelock'
 import { pcmToWav, wavToPcm } from './wav'
 import { closePipWindow, openPipWindow } from './pip'
 import {
+  benchmark,
   disposeEngine,
+  getEngine,
   isCancelled,
   languageName,
   transcribeWithEngine,
+  type LoadStatus,
 } from './engine'
+import { downloadModel } from './download'
 import { buildAsrLayer, deriveEditLayer } from './asr'
 import { decodeToPcm16 } from './ffmpeg'
 import { uid } from './utils'
@@ -90,20 +94,43 @@ export interface ActiveJob {
   etaSec: number | null
 }
 
+export type ModelJobPhase = 'downloading' | 'loading' | 'benchmarking' | 'cancelling'
+
+/**
+ * A model Download running as a background job. Independent of `job`: a download only touches the
+ * network + Cache Storage, so it neither blocks nor is blocked by a transcription.
+ */
+export interface ModelJob {
+  modelId: string
+  label: string
+  phase: ModelJobPhase
+  /** 0..100 across all of the model's files. */
+  pct: number
+  loadedBytes: number
+  totalBytes: number
+  fileIndex: number
+  fileCount: number
+}
+
 /** Post-job banner: the result is ready (click to open) or the run failed (optionally retry). */
 export interface JobNotice {
   kind: 'done' | 'error'
   label: string
   recordId?: string
+  /** Where the banner's primary action goes when there is no transcript to open (model Downloads). */
+  view?: View
   message?: string
-  retry?: JobKind
+  retry?: JobKind | 'model'
 }
 
 // The abort handle and last-file live OUTSIDE reactive state on purpose: mutating them must not
-// trigger renders, and the running job closure has to outlive the component that started it , 
+// trigger renders, and the running job closure has to outlive the component that started it ,
 // that decoupling is exactly what makes a job survive navigating away from its origin screen.
 let jobAbort: AbortController | null = null
 let lastFile: File | null = null
+// Same reasoning for the Download: it outlives the Models screen that started it.
+let modelAbort: AbortController | null = null
+let lastModel: { model: CatalogModel; makeActive: boolean } | null = null
 
 /* ── Live Session ─────────────────────────────────────────────────────────── */
 
@@ -342,6 +369,8 @@ interface AppState {
   future: EditSnapshot[]
   /** The single in-flight transcription job (null when idle). Lives here so navigation is safe. */
   job: ActiveJob | null
+  /** The single in-flight model Download (null when idle). Same nav-safety, separate lane. */
+  modelJob: ModelJob | null
   /** Post-job banner shown when the user isn't already looking at the result. */
   jobNotice: JobNotice | null
   /** The Live Session (null when there has never been one, or it was discarded). */
@@ -374,6 +403,10 @@ interface AppState {
   runFileJob: (file: File) => Promise<void>
   /** Re-transcribe the open record with the Active Model as a nav-safe background job. */
   runRerunJob: () => Promise<void>
+  /** Download a model as a nav-safe background job (fetch → load → provision → benchmark). */
+  startModelDownload: (m: CatalogModel, opts?: { makeActive?: boolean }) => Promise<void>
+  /** Abort the in-flight Download; the bytes already fetched are kept for a resume. */
+  cancelModelDownload: () => void
   /** Abort the in-flight job. */
   stopActiveJob: () => void
   /** Re-dispatch the last failed job. */
@@ -417,6 +450,7 @@ export const useApp = create<AppState>((set, get) => ({
   past: [],
   future: [],
   job: null,
+  modelJob: null,
   jobNotice: null,
   live: null,
   workspaceTab: 'file',
@@ -499,6 +533,8 @@ export const useApp = create<AppState>((set, get) => ({
     }))
   },
   evict: async (m) => {
+    // Never delete out from under a running Download of the same model.
+    if (get().modelJob?.modelId === m.id) get().cancelModelDownload()
     await evictModel(m.hfId, m.id)
     const wasActive = get().activeModel?.id === m.id
     if (wasActive) {
@@ -758,6 +794,95 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
+  startModelDownload: async (model, opts) => {
+    const { capability, modelJob } = get()
+    if (modelJob || !capability) return // one Download at a time; a transcription `job` is no bar
+    const makeActive = !!opts?.makeActive
+    const fc = fitCheck(model, capability)
+    if (!fc.supported) {
+      set({
+        jobNotice: {
+          kind: 'error',
+          label: model.label,
+          message: fc.reason ?? 'This model cannot run on your device.',
+        },
+      })
+      return
+    }
+    lastModel = { model, makeActive }
+    const ac = new AbortController()
+    modelAbort = ac
+    const patch = (p: Partial<ModelJob>) =>
+      set((s) => (s.modelJob ? { modelJob: { ...s.modelJob, ...p } } : {}))
+    const onProgress = (s: LoadStatus) =>
+      patch({
+        pct: Math.round(s.ratio * 100),
+        loadedBytes: s.loadedBytes,
+        totalBytes: s.totalBytes,
+        fileIndex: s.fileIndex,
+        fileCount: s.fileCount,
+      })
+    set({
+      jobNotice: null,
+      modelJob: {
+        modelId: model.id,
+        label: model.label,
+        phase: 'downloading',
+        pct: 0,
+        loadedBytes: 0,
+        totalBytes: 0,
+        fileIndex: 0,
+        fileCount: 0,
+      },
+    })
+    try {
+      // Fetch the weights ourselves first, with Range resume (ADR-0008), so cancel keeps the bytes.
+      // `getEngine` then finds every file in `transformers-cache` and loads instantly.
+      await downloadModel(model, capability.device, { signal: ac.signal, onProgress })
+      patch({ phase: 'loading', pct: 0 })
+      // The engine worker serializes requests: if a transcription is running this load queues
+      // behind it. Fine — the download itself is pure network + Cache Storage and never waited.
+      const device = await getEngine(model, capability.device, { signal: ac.signal, onProgress })
+      get().markProvisioned(model.id)
+      if (get().capability?.benchmarkRtf == null) {
+        patch({ phase: 'benchmarking', pct: 0 })
+        // ponytail: `benchmark` takes no signal, so a Cancel during it only lands once it returns.
+        try {
+          const rtf = await benchmark(model, device)
+          const cap = get().capability
+          if (cap) get().setCapability({ ...cap, benchmarkRtf: rtf })
+        } catch {
+          /* optional */
+        }
+      }
+      if (makeActive) get().setActiveModel(model)
+      modelAbort = null
+      lastModel = null
+      set({
+        modelJob: null,
+        jobNotice: { kind: 'done', label: `${model.label} is ready`, view: 'workspace' },
+      })
+    } catch (e) {
+      modelAbort = null
+      if (isCancelled(e)) {
+        set({ modelJob: null })
+      } else {
+        set({
+          modelJob: null,
+          jobNotice: {
+            kind: 'error',
+            label: model.label,
+            message: e instanceof Error ? e.message : String(e),
+            retry: 'model',
+          },
+        })
+      }
+    }
+  },
+  cancelModelDownload: () => {
+    modelAbort?.abort()
+    set((s) => (s.modelJob ? { modelJob: { ...s.modelJob, phase: 'cancelling' } } : {}))
+  },
   stopActiveJob: () => {
     jobAbort?.abort()
     set((s) => (s.job ? { job: { ...s.job, phase: 'cancelling' } } : {}))
@@ -768,6 +893,9 @@ export const useApp = create<AppState>((set, get) => ({
     set({ jobNotice: null })
     if (notice.retry === 'file' && lastFile) void get().runFileJob(lastFile)
     else if (notice.retry === 'rerun') void get().runRerunJob()
+    else if (notice.retry === 'model' && lastModel) {
+      void get().startModelDownload(lastModel.model, { makeActive: lastModel.makeActive })
+    }
   },
   dismissJobNotice: () => set({ jobNotice: null }),
   setJobNotice: (jobNotice) => set({ jobNotice }),

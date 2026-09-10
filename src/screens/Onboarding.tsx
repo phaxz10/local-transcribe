@@ -18,30 +18,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { fitCheck } from '@/lib/capability'
 import { recommendModel } from '@/lib/catalog'
-import { benchmark, getEngine, isCancelled, type LoadStatus } from '@/lib/engine'
-import { downloadModel } from '@/lib/download'
 import { useApp } from '@/lib/store'
 import { PRIMARY_LANGUAGES, type CatalogModel, type PrimaryLanguage } from '@/lib/types'
 import { formatMb } from '@/lib/utils'
 import { ArrowRight, Download, Loader2, RotateCcw } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
-
-type Phase = 'idle' | 'downloading' | 'calibrating' | 'error' | 'cancelled'
+import { useMemo, useState } from 'react'
 
 export function Onboarding() {
   const catalog = useApp((s) => s.catalog)
   const capability = useApp((s) => s.capability)
   const primaryLanguage = useApp((s) => s.primaryLanguage)
   const setPrimaryLanguage = useApp((s) => s.setPrimaryLanguage)
-  const setActiveModel = useApp((s) => s.setActiveModel)
-  const setCapability = useApp((s) => s.setCapability)
   const setView = useApp((s) => s.setView)
+  const setActiveModel = useApp((s) => s.setActiveModel)
   const provisioned = useApp((s) => s.provisioned)
   const activeModel = useApp((s) => s.activeModel)
-  const markProvisioned = useApp((s) => s.markProvisioned)
   const evict = useApp((s) => s.evict)
+  // The Download is a store-owned background job, so this screen only reads it: leaving and coming
+  // back shows the same progress, and a running Download keeps the rest of the app usable.
+  const modelJob = useApp((s) => s.modelJob)
+  const startModelDownload = useApp((s) => s.startModelDownload)
+  const cancelModelDownload = useApp((s) => s.cancelModelDownload)
 
   const changing = !!activeModel
 
@@ -52,13 +50,11 @@ export function Onboarding() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selected = catalog.find((m) => m.id === selectedId) ?? activeModel ?? recommended
 
-  const [phase, setPhase] = useState<Phase>('idle')
-  const [status, setStatus] = useState<LoadStatus | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [evictTarget, setEvictTarget] = useState<CatalogModel | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
+  /** Purely a UI beat after Cancel, so the resume copy has somewhere to live. */
+  const [cancelled, setCancelled] = useState(false)
 
-  const busy = phase === 'downloading' || phase === 'calibrating'
+  const busy = !!modelJob
 
   const selectedActive = !!selected && activeModel?.id === selected.id
   const selectedProvisioned = !!selected && provisioned.includes(selected.id)
@@ -68,60 +64,21 @@ export function Onboarding() {
       ? capability.storageQuotaMb - capability.storageUsageMb
       : null
 
-  function switchTo(m: CatalogModel) {
-    setActiveModel(m)
-    setView('workspace')
-  }
-
-  async function provision() {
-    if (!selected || !capability) return
-    setError(null)
-    const fc = fitCheck(selected, capability)
-    if (!fc.supported) {
-      setError(fc.reason ?? 'This model cannot run on your device.')
-      setPhase('error')
+  function provision() {
+    if (!selected) return
+    setCancelled(false)
+    // Already downloaded: switching the Active Model is instant (ADR-0008), no job, no notice.
+    if (selectedProvisioned) {
+      setActiveModel(selected)
+      setView('workspace')
       return
     }
-    const ac = new AbortController()
-    abortRef.current = ac
-    setStatus(null)
-    setPhase('downloading')
-    try {
-      // Fetch the weights ourselves first, with Range resume (ADR-0008), so cancel now keeps the
-      // bytes. `getEngine` then finds every file in `transformers-cache` and reports an instant
-      // load through the same progress channel.
-      await downloadModel(selected, capability.device, {
-        signal: ac.signal,
-        onProgress: setStatus,
-      })
-      const device = await getEngine(selected, capability.device, {
-        signal: ac.signal,
-        onProgress: setStatus,
-      })
-      markProvisioned(selected.id)
-      setActiveModel(selected)
-      setPhase('calibrating')
-      try {
-        const rtf = await benchmark(selected, device)
-        setCapability({ ...capability, benchmarkRtf: rtf })
-      } catch {
-        /* optional */
-      }
-      setView('workspace')
-    } catch (e) {
-      if (isCancelled(e)) {
-        setPhase('cancelled')
-      } else {
-        setError(e instanceof Error ? e.message : String(e))
-        setPhase('error')
-      }
-    } finally {
-      abortRef.current = null
-    }
+    void startModelDownload(selected, { makeActive: true })
   }
 
   function cancelDownload() {
-    abortRef.current?.abort()
+    setCancelled(true)
+    cancelModelDownload()
   }
 
   async function confirmEvict() {
@@ -129,8 +86,6 @@ export function Onboarding() {
     setEvictTarget(null)
     if (t) await evict(t)
   }
-
-  const pct = Math.round((status?.ratio ?? 0) * 100)
 
   return (
     <div className="space-y-10">
@@ -200,32 +155,32 @@ export function Onboarding() {
             selected={selected?.id === m.id}
             provisioned={provisioned.includes(m.id)}
             active={activeModel?.id === m.id}
-            busy={busy}
+            busy={modelJob?.modelId === m.id}
             device={capability?.device}
             onSelect={(mm) => setSelectedId(mm.id)}
-            onEvict={busy ? undefined : (mm) => setEvictTarget(mm)}
+            onEvict={modelJob?.modelId === m.id ? undefined : (mm) => setEvictTarget(mm)}
           />
         ))}
       </div>
 
       <div className="sticky bottom-4 z-10 rounded-lg border bg-popover p-4 shadow-lg">
-        {busy ? (
-          phase === 'downloading' ? (
+        {modelJob ? (
+          modelJob.phase === 'downloading' ? (
             <div className="space-y-3">
               <div className="flex items-baseline justify-between gap-3">
                 <span className="lt-eyebrow flex items-center gap-2">
                   <Loader2 className="size-3 animate-spin text-primary" />
-                  Downloading {selected?.label}
+                  Downloading {modelJob.label}
                 </span>
-                <span className="lt-num text-sm">{pct}%</span>
+                <span className="lt-num text-sm">{modelJob.pct}%</span>
               </div>
-              <Progress value={pct} />
+              <Progress value={modelJob.pct} />
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="lt-num text-xs text-muted-foreground">
-                  {status && status.totalBytes > 0
-                    ? `${formatMb(status.loadedBytes / 1e6)} / ${formatMb(
-                        status.totalBytes / 1e6,
-                      )} · file ${status.fileIndex}/${status.fileCount}`
+                  {modelJob.totalBytes > 0
+                    ? `${formatMb(modelJob.loadedBytes / 1e6)} / ${formatMb(
+                        modelJob.totalBytes / 1e6,
+                      )} · file ${modelJob.fileIndex}/${modelJob.fileCount}`
                     : 'Starting'}
                 </span>
                 <Button variant="ghost" size="sm" onClick={cancelDownload}>
@@ -234,41 +189,27 @@ export function Onboarding() {
               </div>
               <p className="text-xs text-muted-foreground">
                 Cancelling keeps what has already downloaded, and picks up from there next
-                time.
+                time. You can keep using the app while it downloads.
               </p>
             </div>
           ) : (
             <p className="lt-eyebrow flex items-center gap-2">
-              <Loader2 className="size-3 animate-spin text-primary" /> Calibrating your
-              browser
+              <Loader2 className="size-3 animate-spin text-primary" />
+              {modelJob.phase === 'loading'
+                ? 'Loading model'
+                : modelJob.phase === 'benchmarking'
+                  ? 'Calibrating your browser'
+                  : 'Stopping'}
             </p>
           )
-        ) : phase === 'error' ? (
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-muted-foreground">{error}</p>
-            <div className="flex shrink-0 gap-2">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setError(null)
-                  setPhase('idle')
-                }}
-              >
-                Choose another
-              </Button>
-              <Button onClick={provision}>
-                <RotateCcw className="size-4" /> Try again
-              </Button>
-            </div>
-          </div>
-        ) : phase === 'cancelled' ? (
+        ) : cancelled ? (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
               Download cancelled. What you already downloaded is kept, and starting again picks
               up where it stopped.
             </p>
             <div className="flex shrink-0 gap-2">
-              <Button variant="ghost" onClick={() => setPhase('idle')}>
+              <Button variant="ghost" onClick={() => setCancelled(false)}>
                 Choose another
               </Button>
               <Button onClick={provision}>
@@ -298,7 +239,7 @@ export function Onboarding() {
                   Open workspace <ArrowRight className="size-4" />
                 </Button>
               ) : selectedProvisioned ? (
-                <Button className="w-full sm:w-auto" onClick={() => switchTo(selected)}>
+                <Button className="w-full sm:w-auto" onClick={provision}>
                   Use this model
                 </Button>
               ) : (
