@@ -81,6 +81,21 @@ async function cachedBytes(hfId: string): Promise<number> {
 }
 
 /**
+ * Drop cached files of a model that the current dtype policy no longer loads (e.g. Parakeet's
+ * q4f16 export, retired for producing NaN logits on WebGPU). Cheap: one key scan per boot.
+ */
+export async function evictStaleFiles(hfId: string, stale: RegExp): Promise<void> {
+  if (!hasCaches()) return
+  try {
+    const cache = await caches.open(WEIGHTS_CACHE)
+    const reqs = (await cache.keys()).filter((r) => urlMatchesHfId(r.url, hfId) && stale.test(r.url))
+    await Promise.all(reqs.map((r) => cache.delete(r)))
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
  * Evict a model's weights from Cache Storage (+ its LFS-hash entries and any resumable
  * `downloadParts` rows) and drop it from the provisioned index. The inverse of Provision.
  * Transcripts and settings are untouched.

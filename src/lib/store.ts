@@ -37,7 +37,7 @@ import {
 import { buildAsrLayer, deriveEditLayer } from './asr'
 import { decodeToPcm16 } from './ffmpeg'
 import { uid } from './utils'
-import { evictModel, markProvisioned as persistProvisioned, reconcileProvisioned } from './models'
+import { evictModel, evictStaleFiles, markProvisioned as persistProvisioned, reconcileProvisioned } from './models'
 
 /** Max undo steps kept per open transcript (Edit-layer time machine). */
 const HISTORY_LIMIT = 100
@@ -432,6 +432,8 @@ export const useApp = create<AppState>((set, get) => ({
     // dropping the index entry and orphaning ~500 MB of weights nothing in the UI can reach.
     const resolveHf = (id: string): string | null => idToHf.get(id) ?? RETIRED[id] ?? null
     const provisioned = await reconcileProvisioned(resolveHf).catch(() => [] as string[])
+    // ponytail: one hard-coded stale-dtype sweep; generalize if a second dtype policy ever changes.
+    void evictStaleFiles('onnx-community/parakeet-ctc-0.6b-ONNX', /_q4f16\.onnx/)
     const retired = provisioned.filter((id) => id in RETIRED)
     for (const id of retired) await evictModel(RETIRED[id], id).catch(() => {})
 
