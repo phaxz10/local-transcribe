@@ -25,7 +25,9 @@ export type { Region as SpeechRegion } from './vad-chunks'
 const LANG_NAMES: Record<string, string> = {
   en: 'english',
   zh: 'chinese',
-  yue: 'cantonese',
+  // transformers.js 4.2.0 has no 'cantonese' in its Whisper language table and throws on it;
+  // 'chinese' is the closest the generic Whisper models accept (small-yue forces it anyway).
+  yue: 'chinese',
   ja: 'japanese',
   tl: 'tagalog',
 }
