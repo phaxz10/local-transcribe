@@ -23,6 +23,8 @@ const AsrLayer = z.object({
   segments: z.array(AsrSegment),
   language: z.string(),
   task: z.enum(['transcribe', 'translate']),
+  /** Absolute-second VAD speech regions, when the pass ran. Turn detection prefers these. */
+  speech: z.array(z.object({ start: z.number(), end: z.number() })).optional(),
 })
 export type AsrLayer = z.infer<typeof AsrLayer>
 
@@ -40,7 +42,7 @@ export type EditWord = z.infer<typeof EditWord>
 const EditSegment = z.object({
   id: z.string(),
   words: z.array(EditWord),
-  /** Reserved for future diarization / manual speaker tagging. */
+  /** The Segment's Speaker, keyed into `TranscriptRecord.speakers`. Absent = unassigned. */
   speakerId: z.string().optional(),
 })
 export type EditSegment = z.infer<typeof EditSegment>
@@ -69,8 +71,11 @@ const TranscriptRecord = z.object({
   updatedAt: z.number(),
   asr: AsrLayer,
   edit: EditLayer,
+  /** Speakers referenced by `EditSegment.speakerId`. Absent on records made before ADR-0017. */
+  speakers: z.record(z.string(), z.object({ name: z.string() })).optional(),
 })
 export type TranscriptRecord = z.infer<typeof TranscriptRecord>
+export type Speakers = NonNullable<TranscriptRecord['speakers']>
 
 /* Model catalog. */
 

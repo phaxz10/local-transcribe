@@ -28,7 +28,13 @@ import {
   findReplaceAll,
 } from '@/lib/edit-ops'
 import { exportTranscript, downloadText } from '@/lib/exporters'
-import type { AsrSegment, EditSegment, ExportFormat, ExportLayer } from '@/lib/types'
+import {
+  alternateByTurn,
+  assignSpeakerForward,
+  clearSpeakers,
+  turnStarts,
+} from '@/lib/turns'
+import type { AsrSegment, EditSegment, ExportFormat, ExportLayer, Speakers } from '@/lib/types'
 import {
   usePlayhead,
   useActiveWord,
@@ -41,6 +47,7 @@ import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { ScreenHeader } from '@/components/ScreenHeader'
 
 const FORMATS: ExportFormat[] = ['txt', 'srt', 'vtt', 'json', 'md']
@@ -116,9 +123,56 @@ const Player = memo(function Player({
   )
 })
 
+/* ── SpeakerPicker: the gutter label + its inline picker. Sentinel values keep it one control ── */
+const NEW_SPEAKER = '__new'
+const RENAME_SPEAKER = '__rename'
+
+function SpeakerPicker({
+  segId,
+  speakerId,
+  speakers,
+  onPick,
+}: {
+  segId: string
+  speakerId: string | undefined
+  speakers: Speakers | undefined
+  onPick: (segId: string, value: string) => void
+}) {
+  const name = speakerId ? speakers?.[speakerId]?.name : undefined
+  return (
+    <Select value={speakerId} onValueChange={(v) => onPick(segId, v)}>
+      <SelectTrigger
+        aria-label={name ? `Speaker: ${name}` : 'Assign a speaker'}
+        title={name ? `Speaker: ${name}` : 'Assign a speaker'}
+        className={cn(
+          'lt-eyebrow h-auto justify-end gap-0 rounded border-0 px-0 py-0 text-[10px] normal-case tracking-normal transition-opacity hover:bg-transparent [&>svg]:hidden',
+          name
+            ? 'text-primary'
+            : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100',
+        )}
+      >
+        <span className="truncate">{name ?? '+ speaker'}</span>
+      </SelectTrigger>
+      <SelectContent>
+        {Object.entries(speakers ?? {}).map(([id, sp]) => (
+          <SelectItem key={id} value={id}>
+            {sp.name}
+          </SelectItem>
+        ))}
+        <SelectItem value={NEW_SPEAKER}>New speaker</SelectItem>
+        {speakerId && <SelectItem value={RENAME_SPEAKER}>Rename…</SelectItem>}
+      </SelectContent>
+    </Select>
+  )
+}
+
 /* ── SegmentRow: subscribes only to the active-word store; memoized with a segment-scoped comparator ── */
 interface SegmentRowProps {
   seg: EditSegment
+  /** Show the Speaker label on this row: it starts a turn, or its Speaker differs from the row above. */
+  showSpeaker: boolean
+  speakers: Speakers | undefined
+  onPickSpeaker: (segId: string, value: string) => void
   selectedWordId: string | null
   editingId: string | null
   confidence: Map<string, number>
@@ -136,6 +190,9 @@ function segHasWord(seg: EditSegment, id: string | null): boolean {
 function rowPropsEqual(prev: SegmentRowProps, next: SegmentRowProps): boolean {
   if (
     prev.seg !== next.seg ||
+    prev.showSpeaker !== next.showSpeaker ||
+    prev.speakers !== next.speakers ||
+    prev.onPickSpeaker !== next.onPickSpeaker ||
     prev.controller !== next.controller ||
     prev.confidence !== next.confidence ||
     prev.onSelectWord !== next.onSelectWord ||
@@ -157,6 +214,9 @@ function rowPropsEqual(prev: SegmentRowProps, next: SegmentRowProps): boolean {
 
 const SegmentRow = memo(function SegmentRow({
   seg,
+  showSpeaker,
+  speakers,
+  onPickSpeaker,
   selectedWordId,
   editingId,
   confidence,
@@ -170,13 +230,23 @@ const SegmentRow = memo(function SegmentRow({
   const segStart = seg.words[0]?.start ?? 0
   return (
     <div className="lt-segment group flex gap-3 sm:gap-5">
-      <button
-        onClick={() => controller.seek(segStart)}
-        title="Jump to this point"
-        className="lt-num mt-[0.45rem] h-fit w-10 shrink-0 rounded text-right text-[11px] text-muted-foreground opacity-50 outline-none transition-opacity hover:text-primary hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
-      >
-        {formatTime(segStart)}
-      </button>
+      <div className="mt-[0.45rem] flex w-14 shrink-0 flex-col items-end gap-1">
+        <button
+          onClick={() => controller.seek(segStart)}
+          title="Jump to this point"
+          className="lt-num h-fit rounded text-right text-[11px] text-muted-foreground opacity-50 outline-none transition-opacity hover:text-primary hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+        >
+          {formatTime(segStart)}
+        </button>
+        {showSpeaker && (
+          <SpeakerPicker
+            segId={seg.id}
+            speakerId={seg.speakerId}
+            speakers={speakers}
+            onPick={onPickSpeaker}
+          />
+        )}
+      </div>
       <p className="flex-1">
         {seg.words.map((w) => {
           const conf = w.origin?.[0] ? confidence.get(w.origin[0]) : undefined
@@ -231,7 +301,7 @@ const RawBody = memo(function RawBody({
           <button
             onClick={() => controller.seek(seg.start)}
             title="Jump to this point"
-            className="lt-num mt-[0.45rem] h-fit w-10 shrink-0 rounded text-right text-[11px] text-muted-foreground opacity-50 outline-none transition-opacity hover:text-primary hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+            className="lt-num mt-[0.45rem] h-fit w-14 shrink-0 rounded text-right text-[11px] text-muted-foreground opacity-50 outline-none transition-opacity hover:text-primary hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
           >
             {formatTime(seg.start)}
           </button>
@@ -293,6 +363,12 @@ export function TranscriptView() {
   const flat = useMemo<FlatWord[]>(
     () => (record ? buildFlatWords(record.edit.segments) : []),
     [record],
+  )
+
+  // Turn boundaries (ADR-0017): a pause of >= 1 s, measured on the VAD regions when we have them.
+  const turns = useMemo(
+    () => turnStarts(record?.edit.segments ?? [], record?.asr.speech),
+    [record?.edit.segments, record?.asr.speech],
   )
 
   const controller = useMemo<Controller>(
@@ -432,6 +508,37 @@ export function TranscriptView() {
     [apply],
   )
 
+  /**
+   * One control, three outcomes: pick an existing Speaker, mint a new one, or rename this row's.
+   * Assignment runs forward until the next Segment that already has a different Speaker, which is
+   * how a dialog gets fixed in one click instead of one per line.
+   */
+  const onPickSpeaker = useCallback(
+    (segId: string, value: string) => {
+      const r = recordRef.current
+      if (!r) return
+      if (value === RENAME_SPEAKER) {
+        const cur = r.edit.segments.find((sg) => sg.id === segId)?.speakerId
+        if (!cur) return
+        const name = window.prompt('Speaker name', r.speakers?.[cur]?.name ?? '')?.trim()
+        if (!name) return
+        commitEdit(r.edit, { ...r.speakers, [cur]: { name } })
+        return
+      }
+      if (value === NEW_SPEAKER) {
+        let n = 1
+        while (r.speakers?.[`spk_${n}`]) n++
+        const name = window.prompt('Speaker name', `Speaker ${n}`)?.trim()
+        if (!name) return
+        const id = `spk_${n}`
+        commitEdit(assignSpeakerForward(r.edit, segId, id), { ...r.speakers, [id]: { name } })
+        return
+      }
+      commitEdit(assignSpeakerForward(r.edit, segId, value))
+    },
+    [commitEdit],
+  )
+
   async function attachMediaFile(file: File) {
     if (!record) return
     const mediaId = record.source.mediaId ?? uid('media_')
@@ -474,6 +581,21 @@ export function TranscriptView() {
     if (count > 0) apply(edit)
   }
 
+  /**
+   * Dialog mode: an explicit starting guess, not a claim. On, it mints two Speakers and alternates
+   * them turn by turn; off, it drops every assignment. Both go through the undo stack.
+   */
+  function toggleDialog(on: boolean) {
+    if (!on) {
+      commitEdit(clearSpeakers(record!.edit), {})
+      return
+    }
+    commitEdit(alternateByTurn(record!.edit, ['spk_1', 'spk_2'], turns), {
+      spk_1: { name: 'Speaker 1' },
+      spk_2: { name: 'Speaker 2' },
+    })
+  }
+
   function doExport(fmt: ExportFormat) {
     const { text, mime, ext } = exportTranscript(record!, fmt, layer)
     const base = record!.source.filename.replace(/\.[^.]+$/, '') || 'transcript'
@@ -492,6 +614,7 @@ export function TranscriptView() {
           : 'Rerunning transcript'
 
   const editable = layer === 'corrected'
+  const hasSpeakers = Object.keys(record.speakers ?? {}).length > 0
 
   return (
     <div className="space-y-8">
@@ -582,6 +705,18 @@ export function TranscriptView() {
               {editable ? 'Corrected · editable' : 'Original · read only'}
             </Label>
           </div>
+
+          {editable && (
+            <div className="flex items-center gap-2">
+              <Switch id="dialog" checked={hasSpeakers} onCheckedChange={toggleDialog} />
+              <Label htmlFor="dialog" className="lt-eyebrow">
+                Two-person dialog
+              </Label>
+              <span className="hidden text-xs text-muted-foreground lg:inline">
+                Alternates speakers at each pause; fix any wrong ones by clicking the label
+              </span>
+            </div>
+          )}
 
           <div className="ml-auto flex flex-wrap items-center gap-1">
             <Button
@@ -741,10 +876,15 @@ export function TranscriptView() {
       {/* Transcript body */}
       {editable ? (
         <div className="lt-measure lt-read space-y-4">
-          {record.edit.segments.map((seg) => (
+          {record.edit.segments.map((seg, i) => (
             <SegmentRow
               key={seg.id}
               seg={seg}
+              showSpeaker={
+                turns.has(seg.id) || seg.speakerId !== record.edit.segments[i - 1]?.speakerId
+              }
+              speakers={record.speakers}
+              onPickSpeaker={onPickSpeaker}
               selectedWordId={selected?.wordId ?? null}
               editingId={editingId}
               confidence={confidence}

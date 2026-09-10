@@ -7,6 +7,7 @@ import type {
   EditLayer,
   EngineDevice,
   PrimaryLanguage,
+  Speakers,
   TranscriptRecord,
 } from './types'
 import { detectCapability, estimateEta } from './capability'
@@ -40,6 +41,14 @@ import { evictModel, markProvisioned as persistProvisioned, reconcileProvisioned
 
 /** Max undo steps kept per open transcript (Edit-layer time machine). */
 const HISTORY_LIMIT = 100
+
+/** One step of the time machine: the Edit layer plus the Speakers it referenced (ADR-0017). */
+export interface EditSnapshot {
+  edit: EditLayer
+  speakers?: Speakers
+}
+
+const snapshot = (r: TranscriptRecord): EditSnapshot => ({ edit: r.edit, speakers: r.speakers })
 
 export type View = 'landing' | 'onboarding' | 'workspace' | 'transcript' | 'history'
 
@@ -325,9 +334,9 @@ interface AppState {
   /** Transient object URL for the current session's media (never persisted). */
   mediaUrl: string | null
   history: TranscriptRecord[]
-  /** Undo/redo stacks of Edit layers for the open transcript (a basic time machine). */
-  past: EditLayer[]
-  future: EditLayer[]
+  /** Undo/redo stacks for the open transcript (a basic time machine). */
+  past: EditSnapshot[]
+  future: EditSnapshot[]
   /** The single in-flight transcription job (null when idle). Lives here so navigation is safe. */
   job: ActiveJob | null
   /** Post-job banner shown when the user isn't already looking at the result. */
@@ -349,8 +358,11 @@ interface AppState {
   setCapability: (c: CapabilityReport) => void
   setRecord: (r: TranscriptRecord | null) => void
   setMediaUrl: (url: string | null) => void
-  /** Apply an edit to the open transcript: push the prior Edit layer onto undo, clear redo, autosave. */
-  commitEdit: (edit: EditLayer) => void
+  /**
+   * Apply an edit to the open transcript: push the prior snapshot onto undo, clear redo, autosave.
+   * `speakers` omitted leaves the map alone; an empty map clears it.
+   */
+  commitEdit: (edit: EditLayer, speakers?: Speakers) => void
   undo: () => void
   redo: () => void
   refreshHistory: () => Promise<void>
@@ -493,13 +505,19 @@ export const useApp = create<AppState>((set, get) => ({
     if (prev && prev !== mediaUrl) URL.revokeObjectURL(prev)
     set({ mediaUrl })
   },
-  commitEdit: (edit) => {
+  commitEdit: (edit, speakers) => {
     const { record } = get()
     if (!record) return
-    const updated = { ...record, edit, updatedAt: Date.now() }
+    const next =
+      speakers === undefined
+        ? record.speakers
+        : Object.keys(speakers).length > 0
+          ? speakers
+          : undefined
+    const updated = { ...record, edit, speakers: next, updatedAt: Date.now() }
     set((s) => ({
       record: updated,
-      past: [...s.past, record.edit].slice(-HISTORY_LIMIT),
+      past: [...s.past, snapshot(record)].slice(-HISTORY_LIMIT),
       future: [],
     }))
     void saveTranscript(updated).then(() => get().refreshHistory())
@@ -508,11 +526,11 @@ export const useApp = create<AppState>((set, get) => ({
     const { record, past, future } = get()
     if (!record || past.length === 0) return
     const prev = past[past.length - 1]
-    const updated = { ...record, edit: prev, updatedAt: Date.now() }
+    const updated = { ...record, ...prev, updatedAt: Date.now() }
     set({
       record: updated,
       past: past.slice(0, -1),
-      future: [record.edit, ...future].slice(0, HISTORY_LIMIT),
+      future: [snapshot(record), ...future].slice(0, HISTORY_LIMIT),
     })
     void saveTranscript(updated).then(() => get().refreshHistory())
   },
@@ -520,10 +538,10 @@ export const useApp = create<AppState>((set, get) => ({
     const { record, past, future } = get()
     if (!record || future.length === 0) return
     const next = future[0]
-    const updated = { ...record, edit: next, updatedAt: Date.now() }
+    const updated = { ...record, ...next, updatedAt: Date.now() }
     set({
       record: updated,
-      past: [...past, record.edit].slice(-HISTORY_LIMIT),
+      past: [...past, snapshot(record)].slice(-HISTORY_LIMIT),
       future: future.slice(1),
     })
     void saveTranscript(updated).then(() => get().refreshHistory())

@@ -158,3 +158,15 @@ _Avoid_: raw transcript (it is a *layer* of a Transcript), source text.
 **Edit Layer**:
 The user-facing, mutable correction layer derived from the ASR Layer, mapping each edited Word back to its origin Word(s) for timing.
 _Avoid_: overrides, diff, patch.
+
+**Speaker**:
+A named participant a user attaches to Segments of a Transcript, stored per Transcript and referenced by Segment. Names are the user's to set; the app never claims to have recognised a voice.
+_Avoid_: voice, person, diarization label (that names a model output we don't have yet).
+
+**Turn**:
+A run of consecutive Segments separated from the previous run by a pause of at least a second, computed from the VAD speech regions. The unit a Speaker is guessed and assigned over.
+_Avoid_: paragraph, block (those name layout); Spoken Turn (that's the Native Translate exchange).
+
+**Dialog mode**:
+The opt-in two-Speaker guess: alternate Speakers at every Turn as a starting point the user corrects, for the common case of a two-person recording. Explicitly a guess about conversation shape, not about who is speaking.
+_Avoid_: diarization, speaker detection, auto-label (all imply an identity claim).

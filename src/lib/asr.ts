@@ -45,7 +45,12 @@ export function buildAsrLayer(out: ASRResult, language = 'auto', offsetSeconds =
   }
   flush()
 
-  return { segments, language, task: 'transcribe' }
+  // Carry the VAD regions through so turn detection can measure real pauses, not word-time jitter.
+  const speech = out.speech?.map((r) => ({
+    start: r.start + offsetSeconds,
+    end: r.end + offsetSeconds,
+  }))
+  return { segments, language, task: 'transcribe', ...(speech?.length ? { speech } : {}) }
 }
 
 /** Derive the editable layer 1:1 from the ASR layer (timing = exact). */
