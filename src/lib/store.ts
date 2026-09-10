@@ -27,6 +27,7 @@ import {
   setSetting,
 } from './db'
 import { startCapture, type Capture } from './mic'
+import { syncWakeLock } from './wakelock'
 import { pcmToWav, wavToPcm } from './wav'
 import { closePipWindow, openPipWindow } from './pip'
 import {
@@ -1031,3 +1032,9 @@ export const useApp = create<AppState>((set, get) => ({
     set({ pipOpen: false })
   },
 }))
+
+// Screen stays on while recording; released on stop, pause, or discard.
+useApp.subscribe((s, prev) => {
+  const now = s.live?.status === 'recording'
+  if (now !== (prev.live?.status === 'recording')) syncWakeLock(now)
+})
