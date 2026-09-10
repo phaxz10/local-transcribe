@@ -29,6 +29,18 @@ const PART_BYTES = 8 * 1024 * 1024
 const DTYPE_SUFFIX = { fp32: '', fp16: '_fp16', q8: '_quantized', q4: '_q4' } as const
 type Dtype = keyof typeof DTYPE_SUFFIX
 
+/**
+ * The worker loads Silero VAD alongside *every* ASR model, so it prefetches with every model:
+ * 2.2 MB, one file, no config.json (the repo has none). Cheap insurance that a user who
+ * downloaded a model while online still gets silence gating offline.
+ *
+ * It is a separate hfId on purpose. `evictModel`/`reconcileProvisioned` in `models.ts` key on
+ * `/${hfId}/resolve/`, so evicting an ASR model leaves the shared VAD in place and reconcile
+ * never counts it as belonging to one — no change needed there.
+ */
+const VAD_HF_ID = 'onnx-community/silero-vad'
+const VAD_FILES = ['onnx/model.onnx']
+
 const CONFIG_FILES = [
   'config.json',
   'generation_config.json',
@@ -43,7 +55,17 @@ const CONFIG_FILES = [
  * Transformers.js bundle at top level. If the dtype policy changes there, change it here too, or
  * this prefetches files nobody then loads (wasteful, not broken).
  */
+/** Mirror of `DTYPE_OVERRIDES` in `engine.worker.ts` (the "why" lives there). */
+const DTYPE_OVERRIDES: Record<
+  string,
+  Partial<Record<EngineDevice, { encoder: Dtype; decoder: Dtype }>>
+> = {
+  'onnx-community/whisper-small-cantonese-ONNX': { webgpu: { encoder: 'fp16', decoder: 'q4' } },
+}
+
 function dtypesFor(model: CatalogModel, device: EngineDevice): { encoder: Dtype; decoder: Dtype } {
+  const override = DTYPE_OVERRIDES[model.hfId]?.[device]
+  if (override) return override
   const large = model.family === 'large-v3-turbo'
   if (device === 'webgpu') {
     return large ? { encoder: 'fp16', decoder: 'q4' } : { encoder: 'fp16', decoder: 'fp16' }
@@ -57,12 +79,17 @@ function dtypesFor(model: CatalogModel, device: EngineDevice): { encoder: Dtype;
  * no dtype policy above ever picks fp32 for that model. (Verified: every other `*.onnx_data`
  * candidate 404s on the Hub.)
  */
-export function modelFiles(model: CatalogModel, device: EngineDevice): string[] {
+export function modelFiles(
+  model: CatalogModel,
+  device: EngineDevice,
+): Array<{ hfId: string; file: string }> {
   const { encoder, decoder } = dtypesFor(model, device)
+  const own = (file: string) => ({ hfId: model.hfId, file })
   return [
-    ...CONFIG_FILES,
-    `onnx/encoder_model${DTYPE_SUFFIX[encoder]}.onnx`,
-    `onnx/decoder_model_merged${DTYPE_SUFFIX[decoder]}.onnx`,
+    ...CONFIG_FILES.map(own),
+    own(`onnx/encoder_model${DTYPE_SUFFIX[encoder]}.onnx`),
+    own(`onnx/decoder_model_merged${DTYPE_SUFFIX[decoder]}.onnx`),
+    ...VAD_FILES.map((file) => ({ hfId: VAD_HF_ID, file })),
   ]
 }
 
@@ -130,7 +157,7 @@ export async function downloadModel(
 
   const cache = await caches.open(WEIGHTS_CACHE)
   const plans: FilePlan[] = []
-  for (const file of modelFiles(model, device)) plans.push(await planFile(cache, model.hfId, file))
+  for (const { hfId, file } of modelFiles(model, device)) plans.push(await planFile(cache, hfId, file))
 
   const totalBytes = plans.reduce((n, p) => n + p.size, 0)
   let doneBytes = plans.reduce((n, p) => n + (p.cached ? p.size : 0), 0)

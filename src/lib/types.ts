@@ -98,6 +98,11 @@ export interface CatalogModel {
   requiresWebGPU: boolean
   /** Curated per-language quality used for model recommendation. */
   languages: Record<string, LangQuality>
+  /**
+   * Whisper language token to send regardless of the picked Primary Language. For a fine-tune
+   * whose tokenizer lacks the token its own language would map to (see `small-yue`).
+   */
+  forceLanguage?: string
   available: boolean
 }
 

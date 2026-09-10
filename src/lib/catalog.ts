@@ -14,7 +14,18 @@ const ENTRIES: Entry[] = [
   // WITH cross-attentions. The canonical `whisper-large-v3-turbo` export lacks them and throws
   // "Model outputs must contain cross attentions"; the `_timestamped` sibling is re-exported with
   // output_attentions=True (same q4/fp16 ONNX variants). Don't revert this id, it reintroduces the crash.
-  { id: 'large-v3-turbo', label: 'Large v3 Turbo', task: 'transcription', family: 'large-v3-turbo', hfId: 'onnx-community/whisper-large-v3-turbo_timestamped', englishOnly: false, multilingual: true, sizeMb: 1600, ramCeilingMb: 2400, requiresWebGPU: true, languages: { en: 3, zh: 3, ja: 3, yue: 2, tl: 2 } },
+  // yue: 0, not 2. Turbo scores 43.3% CER on FLEURS Cantonese, a 4x regression against large-v3;
+  // `small-yue` below is 7.93% CER at a quarter of the download (docs/research-asr-2026-09.md §1).
+  { id: 'large-v3-turbo', label: 'Large v3 Turbo', task: 'transcription', family: 'large-v3-turbo', hfId: 'onnx-community/whisper-large-v3-turbo_timestamped', englishOnly: false, multilingual: true, sizeMb: 1600, ramCeilingMb: 2400, requiresWebGPU: true, languages: { en: 3, zh: 3, ja: 3, yue: 0, tl: 2 } },
+  // Cantonese specialist (alvanlii/whisper-small-cantonese). Two verified quirks:
+  //  1. Its tokenizer is Whisper-v2's 99-language one (vocab 51865) and has NO `<|yue|>` token, so
+  //     `language: 'cantonese'` would not resolve -> forceLanguage 'chinese'. `forced_decoder_ids`
+  //     is null and there is no `lang_to_id`, so the argument is honoured, not ignored.
+  //  2. The decoder ONNX exports no `cross_attentions` outputs (checked against the graph), so
+  //     `return_timestamps: 'word'` throws and `transcribeOne`'s retry degrades it to chunk-level
+  //     timings. Cantonese transcripts therefore have coarser word seeking than the others.
+  // sizeMb is the WASM path (fp32 enc 353 + q8 dec 315 MB); WebGPU is 409 MB (fp16 + q4).
+  { id: 'small-yue', label: 'Small (Cantonese)', task: 'transcription', family: 'small', hfId: 'onnx-community/whisper-small-cantonese-ONNX', englishOnly: false, multilingual: false, forceLanguage: 'chinese', sizeMb: 670, ramCeilingMb: 1200, requiresWebGPU: false, languages: { yue: 3, zh: 1, en: 0, ja: 0, tl: 0 } },
 ]
 
 export function buildCatalog(): CatalogModel[] {
@@ -40,15 +51,25 @@ export function recommendModel(
   const english = primary === 'en'
   const maxRam = TIER_MAX_RAM[cap.tier]
 
-  const usable = catalog.filter(
+  const gated = catalog.filter(
     (m) =>
       m.available &&
       m.task === 'transcription' &&
       m.ramCeilingMb <= maxRam &&
       (!m.requiresWebGPU || cap.webgpu) &&
-      (primary === 'auto' ? m.multilingual : english ? m.englishOnly || m.multilingual : m.multilingual) &&
-      (primary === 'auto' || english || (m.languages[primary] ?? 0) >= 1),
+      // For a specific non-English language, `!englishOnly` rather than `multilingual`: a
+      // single-language fine-tune (small-yue) is neither, and the quality floor below is what
+      // actually decides whether it fits.
+      (primary === 'auto' ? m.multilingual : english ? m.englishOnly || m.multilingual : !m.englishOnly),
   )
+
+  // If a model purpose-built for this language is in reach (rating 3), demand at least "ok" (2)
+  // from everything else, so a generic model rated "limited" can't outrank it on family order
+  // alone — which is how Cantonese users used to be steered at large-v3-turbo. No such model?
+  // Fall back to the old floor of 1.
+  const floor =
+    primary === 'auto' || english ? 0 : gated.some((m) => (m.languages[primary] ?? 0) >= 3) ? 2 : 1
+  const usable = gated.filter((m) => (m.languages[primary] ?? 0) >= floor)
 
   const ranked = usable.sort((a, b) => {
     const fr = familyRank(b) - familyRank(a)
@@ -59,4 +80,12 @@ export function recommendModel(
   })
 
   return ranked[0] ?? catalog.find((m) => m.available && m.task === 'transcription') ?? null
+}
+
+if (import.meta.env.DEV) {
+  // Self-check for the two recommendations this file exists to get right. Cheap, dev-only.
+  const high = { tier: 'high', webgpu: true } as CapabilityReport
+  const pick = (lang: PrimaryLanguage) => recommendModel(buildCatalog(), high, lang)?.id
+  console.assert(pick('yue') === 'small-yue', 'recommendModel(yue) should be small-yue, got', pick('yue'))
+  console.assert(pick('en') === 'large-v3-turbo', 'recommendModel(en) should be large-v3-turbo, got', pick('en'))
 }

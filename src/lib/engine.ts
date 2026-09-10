@@ -19,6 +19,7 @@ import { CancelledError, isCancelled as isCancelledError } from './cancel'
 
 export { isCancelled } from './cancel'
 export type { ASRChunk, ASRResult, LoadStatus, TranscribeProgress } from './engine.worker'
+export type { Region as SpeechRegion } from './vad-chunks'
 
 const LANG_NAMES: Record<string, string> = {
   en: 'english',
@@ -31,9 +32,11 @@ const LANG_NAMES: Record<string, string> = {
 export function languageName(
   primary: PrimaryLanguage,
   englishOnly: boolean,
+  forceLanguage?: string,
 ): string | undefined {
   // English-only models must NOT receive a language/task (Transformers.js throws).
   if (englishOnly) return undefined
+  if (forceLanguage) return forceLanguage
   if (primary === 'auto') return undefined
   return LANG_NAMES[primary]
 }
