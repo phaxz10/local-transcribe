@@ -86,7 +86,7 @@ const TranscriptRecord = z.object({
     .object({
       to: z.literal('en'),
       from: z.string(),
-      pair: z.enum(['zh-en', 'ja-en']),
+      pair: z.enum(['zh-en', 'ja-en', 'ko-en']),
       model: z.string(),
     })
     .optional(),
