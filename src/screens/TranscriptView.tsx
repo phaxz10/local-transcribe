@@ -2,13 +2,13 @@ import { ScreenHeader } from '@/components/ScreenHeader'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
-  DialogTrigger,
-  DialogContent,
-  DialogHeader,
-  DialogFooter,
-  DialogTitle,
-  DialogDescription,
   DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
@@ -41,8 +41,8 @@ import { useApp } from '@/lib/store'
 import {
   isEnglish,
   sourceLanguageLabel,
-  translationPairFor,
   TRANSLATION_SOURCES,
+  translationPairFor,
 } from '@/lib/translation'
 import {
   alternateByTurn,
@@ -655,7 +655,7 @@ export function TranscriptView() {
       ? 'Decoding source media'
       : bgJob?.phase === 'loading'
         ? bgJob.kind === 'translate'
-          ? 'Loading the translation model (once)'
+          ? 'Loading the translation model'
           : 'Loading model'
         : bgJob?.phase === 'translating'
           ? 'Translating to English'
