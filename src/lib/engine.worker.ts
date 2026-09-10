@@ -110,7 +110,13 @@ interface LogitsTensor {
 // Transformers.js ASR pipeline type is complex; alias loosely.
 type ASR = Awaited<ReturnType<typeof pipeline>> & {
   (audio: Float32Array, opts?: Record<string, unknown>): Promise<ASRResult>
-  tokenizer: { model: { vocab: string[] } }
+  /**
+   * `PreTrainedTokenizer` (v4.2.0) has no public `.model`/`id_to_token` — those live on the
+   * internal engine it wraps. `AutoTokenizer` falls back to the base `PreTrainedTokenizer` class
+   * for Parakeet (its `ParakeetTokenizer` class isn't in this library build), but that fallback
+   * still builds a real `_tokenizer` underneath, so this path is unaffected by the fallback.
+   */
+  tokenizer: { _tokenizer: { id_to_token(id: number): string | undefined } }
   /** Reached directly only on the CTC path (see `transcribeCtc`). */
   model: ((inputs: unknown) => Promise<{ logits: LogitsTensor }>) & {
     config: { model_type?: string; pad_token_id?: number }
@@ -495,7 +501,6 @@ async function transcribeCtc(asr: ASR, wave: Float32Array, offsetSeconds: number
   const [, frames, vocab] = logits.dims
   const data = logits.to('float32').data
   const blank = asr.model.config.pad_token_id ?? vocab - 1
-  const pieces = asr.tokenizer.model.vocab
   const chunks: ASRChunk[] = []
   let prev = -1
   for (let t = 0; t < frames; t++) {
@@ -505,7 +510,7 @@ async function transcribeCtc(asr: ASR, wave: Float32Array, offsetSeconds: number
     const repeated = best === prev
     prev = best
     if (best === blank || best === 0 /* <unk> */ || repeated) continue
-    const piece = pieces[best] ?? ''
+    const piece = asr.tokenizer._tokenizer.id_to_token(best) ?? ''
     const start = offsetSeconds + t * CTC_FRAME_SECONDS
     const last = chunks[chunks.length - 1]
     if (last && !piece.startsWith('▁')) {

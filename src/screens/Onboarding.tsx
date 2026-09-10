@@ -201,6 +201,7 @@ export function Onboarding() {
             provisioned={provisioned.includes(m.id)}
             active={activeModel?.id === m.id}
             busy={busy}
+            device={capability?.device}
             onSelect={(mm) => setSelectedId(mm.id)}
             onEvict={busy ? undefined : (mm) => setEvictTarget(mm)}
           />

@@ -109,10 +109,11 @@ export function fitCheck(model: CatalogModel, cap: CapabilityReport): FitResult 
       reason: 'This model needs WebGPU, which is not available in this browser.',
     }
   }
-  if (cap.storageQuotaMb != null && cap.storageUsageMb != null && model.sizeMb > 0) {
+  const sizeMb = (cap.device === 'wasm' && model.sizeMbWasm) || model.sizeMb
+  if (cap.storageQuotaMb != null && cap.storageUsageMb != null && sizeMb > 0) {
     const free = cap.storageQuotaMb - cap.storageUsageMb
-    if (free < model.sizeMb * 1.3) {
-      return { supported: false, reason: `Not enough free storage (~${model.sizeMb} MB needed).` }
+    if (free < sizeMb * 1.3) {
+      return { supported: false, reason: `Not enough free storage (~${sizeMb} MB needed).` }
     }
   }
   return { supported: true }

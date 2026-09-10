@@ -102,6 +102,8 @@ export interface CatalogModel {
   multilingual: boolean
   /** Approximate download size in MB. */
   sizeMb: number
+  /** Download size in MB on the WASM path, when it differs from the (WebGPU) `sizeMb`. */
+  sizeMbWasm?: number
   /** Estimated peak runtime memory in MB (for the Fit-check). */
   ramCeilingMb: number
   /** Gate to WebGPU devices. On WASM these are impractically slow. */

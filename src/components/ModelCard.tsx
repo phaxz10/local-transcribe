@@ -1,5 +1,5 @@
 import { Trash2 } from 'lucide-react'
-import type { CatalogModel } from '@/lib/types'
+import type { CatalogModel, EngineDevice } from '@/lib/types'
 import { cn, formatMb } from '@/lib/utils'
 
 const LANG_LABELS: Record<string, string> = {
@@ -34,6 +34,7 @@ export function ModelCard({
   provisioned,
   active,
   busy,
+  device,
   onSelect,
   onEvict,
 }: {
@@ -45,10 +46,13 @@ export function ModelCard({
   /** This is the Active Model. */
   active: boolean
   busy?: boolean
+  /** Used to show `sizeMbWasm` instead of `sizeMb` when the download will run on WASM. */
+  device?: EngineDevice
   onSelect: (m: CatalogModel) => void
   onEvict?: (m: CatalogModel) => void
 }) {
   const disabled = !model.available || busy
+  const sizeMb = (device === 'wasm' && model.sizeMbWasm) || model.sizeMb
   const status = active
     ? 'Active'
     : provisioned
@@ -84,8 +88,8 @@ export function ModelCard({
           <div className="lt-eyebrow mt-1.5">
             {provisioned
               ? 'Ready offline'
-              : model.sizeMb > 0
-                ? `${formatMb(model.sizeMb)} download`
+              : sizeMb > 0
+                ? `${formatMb(sizeMb)} download`
                 : 'Size varies'}
           </div>
         </div>
